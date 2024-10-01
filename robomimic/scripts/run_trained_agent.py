@@ -128,10 +128,6 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
         traj.update(dict(obs=[], next_obs=[]))
     try:
         for step_i in range(horizon):
-            # HACK: some keys on real robot do not have a shape (and then they get frame stacked)
-            for k in obs:
-                if len(obs[k].shape) == 1:
-                    obs[k] = obs[k][..., None] 
 
             # get action from policy
             t1 = time.time()
@@ -150,7 +146,7 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
                 next_obs = obs
             else:
                 # play action
-                next_obs, r, done, _ = env.step(act)
+                next_obs, r, done, truncated, _ = env.step(act)
 
             # compute reward
             total_reward += r
@@ -172,8 +168,6 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
             traj["actions"].append(act)
             traj["rewards"].append(r)
             traj["dones"].append(done)
-            if not real:
-                traj["states"].append(state_dict["states"])
             if return_obs:
                 # Note: We need to "unprocess" the observations to prepare to write them to dataset.
                 #       This includes operations like channel swapping and float to uint8 conversion
@@ -358,7 +352,6 @@ def run_trained_agent(args):
             # store transitions
             ep_data_grp = data_grp.create_group("demo_{}".format(i))
             ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
-            ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
             ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
             ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
             if args.dataset_obs:
