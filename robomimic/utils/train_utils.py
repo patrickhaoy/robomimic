@@ -351,7 +351,7 @@ def run_rollout(
             ac = policy(ob=ob_dict, goal=goal_dict)
 
             # play action
-            ob_dict, r, done, _ = env.step(ac)
+            ob_dict, r, done, truncated, _ = env.step(ac)
 
             # render to screen
             if render:
