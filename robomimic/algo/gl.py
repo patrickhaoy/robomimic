@@ -113,7 +113,7 @@ class GL(PlannerAlgo):
         # remove temporal batches for all except scalar signals (to be compatible with model outputs)
         input_batch["obs"] = { k: batch["obs"][k][:, 0, :] for k in batch["obs"] }
         # extract multi-horizon subgoal target
-        input_batch["subgoals"] = {k: batch["next_obs"][k][:, self._subgoal_horizon - 1, :] for k in batch["next_obs"]}
+        input_batch["subgoals"] = {k: batch["obs"][k][:, self._subgoal_horizon - 1, :] for k in batch["obs"]}
         input_batch["target_subgoals"] = input_batch["subgoals"]
         input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
 

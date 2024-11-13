@@ -148,8 +148,8 @@ class HBC(HierarchicalAlgo):
             # optionally use randomly sampled step between [1, seq_length] as policy goal
             policy_subgoal_indices = torch.randint(
                 low=0, high=self.global_config.train.seq_length, size=(batch["actions"].shape[0],))
-            goal_obs = TensorUtils.gather_sequence(batch["next_obs"], policy_subgoal_indices)
-            goal_obs = TensorUtils.to_float(TensorUtils.to_device(goal_obs, self.device))
+            goal_obs = TensorUtils.gather_sequence(batch["obs"], policy_subgoal_indices)
+            goal_obs = TensorUtils.to_float(TensorUtils.to_device({"target_subgoals": goal_obs}, self.device))
             input_batch["actor"]["goal_obs"] = \
                 self.planner.get_actor_goal_for_training_from_processed_batch(
                     goal_obs,
