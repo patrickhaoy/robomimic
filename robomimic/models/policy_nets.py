@@ -103,8 +103,9 @@ class ActorNetwork(MIMO_MLP):
 
     def forward(self, obs_dict, goal_dict=None):
         actions = super(ActorNetwork, self).forward(obs=obs_dict, goal=goal_dict)["action"]
-        # apply tanh squashing to ensure actions are in [-1, 1]
-        return torch.tanh(actions)
+        # # apply tanh squashing to ensure actions are in [-1, 1]
+        # return torch.tanh(actions)
+        return actions
 
     def _to_string(self):
         """Info to pretty print."""
@@ -693,8 +694,9 @@ class RNNActorNetwork(RNN_MIMO_MLP):
             actions = outputs
             state = None
         
-        # apply tanh squashing to ensure actions are in [-1, 1]
-        actions = torch.tanh(actions["action"])
+        # # apply tanh squashing to ensure actions are in [-1, 1]
+        # actions = torch.tanh(actions["action"])
+        actions = actions["action"]
 
         if return_state:
             return actions, state
@@ -1118,8 +1120,8 @@ class TransformerActorNetwork(MIMO_Transformer):
         forward_kwargs = dict(obs=obs_dict, goal=goal_dict)
         outputs = super(TransformerActorNetwork, self).forward(**forward_kwargs)
 
-        # apply tanh squashing to ensure actions are in [-1, 1]
-        outputs["action"] = torch.tanh(outputs["action"])
+        # # apply tanh squashing to ensure actions are in [-1, 1]
+        # outputs["action"] = torch.tanh(outputs["action"])
 
         return outputs["action"] # only action sequences
 
