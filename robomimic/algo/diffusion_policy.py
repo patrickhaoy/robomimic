@@ -114,6 +114,10 @@ class DiffusionPolicyUNet(PolicyAlgo):
         self.action_check_done = False
         self.obs_queue = None
         self.action_queue = None
+
+        ### debug
+        self.init_obs = None
+        ### debug
     
     def process_batch_for_training(self, batch):
         """
@@ -140,6 +144,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # check if actions are normalized to [-1,1]
         if not self.action_check_done:
             actions = input_batch["actions"]
+            actions = torch.clip(actions, -1, 1)
             in_range = (-1 <= actions) & (actions <= 1)
             all_in_range = torch.all(in_range).item()
             if not all_in_range:
@@ -253,17 +258,37 @@ class DiffusionPolicyUNet(PolicyAlgo):
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
     
-    def reset(self):
+    def reset(self, resets):
         """
         Reset algo state to prepare for environment rollouts.
         """
         # setup inference queues
+        assert resets is not None
         To = self.algo_config.horizon.observation_horizon
         Ta = self.algo_config.horizon.action_horizon
-        obs_queue = deque(maxlen=To)
-        action_queue = deque(maxlen=Ta)
-        self.obs_queue = obs_queue
-        self.action_queue = action_queue
+        self.num_envs = resets.shape[0]
+        if self.action_queue is None:
+            self.action_queue = [deque(maxlen=Ta) for _ in range(self.num_envs)]
+        elif resets.sum() > 0:
+            self.action_queue = [deque(maxlen=Ta) if resets[i] else self.action_queue[i] for i in range(self.num_envs)]
+
+        # if resets is None:
+        #     self.num_envs = 1
+        #     obs_queue = deque(maxlen=To)
+        #     action_queue = deque(maxlen=Ta)
+        #     self.obs_queue = obs_queue
+        #     self.action_queue = action_queue
+        # else:
+        #     self.num_envs = len(resets)
+        #     self.action_queue = [deque(maxlen=Ta) for _ in range(self.num_envs)]
+            # if self.obs_queue is None:
+            #     self.obs_queue = [deque(maxlen=To) for _ in range(self.num_envs)]
+            # else:
+            #     self.obs_queue = [deque(maxlen=To) if resets[i] else self.obs_queue[i] for i in range(self.num_envs)]
+            # if self.action_queue is None:
+            #     self.action_queue = [deque(maxlen=Ta) for _ in range(self.num_envs)]
+            # else:
+            #     self.action_queue = [deque(maxlen=Ta) if resets[i] else self.action_queue[i] for i in range(self.num_envs)]
     
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -286,27 +311,35 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # if already full, append one to the obs_queue
         # n_repeats = max(To - len(self.obs_queue), 1)
         # self.obs_queue.extend([obs_dict] * n_repeats)
-        
-        if len(self.action_queue) == 0:
-            # no actions left, run inference
-            # turn obs_queue into dict of tensors (concat at T dim)
-            # import pdb; pdb.set_trace()
-            # obs_dict_list = TensorUtils.list_of_flat_dict_to_dict_of_list(list(self.obs_queue))
-            # obs_dict_tensor = dict((k, torch.cat(v, dim=0).unsqueeze(0)) for k,v in obs_dict_list.items())
+        # if self.num_envs > 1:
+        reset_envs = [len(aq) == 0 for aq in self.action_queue]
+        # [len(aq) for aq in self.action_queue]
+        if reset_envs.count(True) > 0:
+            new_action_sequences = self._get_action_trajectory(obs_dict=obs_dict)
+            for i in range(self.num_envs):
+                if reset_envs[i]:
+                    self.action_queue[i].extend(new_action_sequences[i])
+        action = torch.stack([self.action_queue[i].popleft() for i in range(self.num_envs)], dim=0)
+        # else:
+        #     if len(self.action_queue) == 0:
+        #         # no actions left, run inference
+        #         # turn obs_queue into dict of tensors (concat at T dim)
+        #         # import pdb; pdb.set_trace()
+        #         # obs_dict_list = TensorUtils.list_of_flat_dict_to_dict_of_list(list(self.obs_queue))
+        #         # obs_dict_tensor = dict((k, torch.cat(v, dim=0).unsqueeze(0)) for k,v in obs_dict_list.items())
+                
+        #         # run inference
+        #         # [1,T,Da]
+        #         action_sequence = self._get_action_trajectory(obs_dict=obs_dict)
+                
+        #         # put actions into the queue
+        #         self.action_queue.extend(action_sequence[0])
             
-            # run inference
-            # [1,T,Da]
-            action_sequence = self._get_action_trajectory(obs_dict=obs_dict)
-            
-            # put actions into the queue
-            self.action_queue.extend(action_sequence[0])
-        
-        # has action, execute from left to right
-        # [Da]
-        action = self.action_queue.popleft()
-        
-        # [1,Da]
-        action = action.unsqueeze(0)
+        #     # has action, execute from left to right
+        #     # [Da]
+        #     action = self.action_queue.popleft()
+        #     # [1,Da]
+        #     action = action.unsqueeze(0)
         return action
         
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
@@ -321,7 +354,6 @@ class DiffusionPolicyUNet(PolicyAlgo):
             num_inference_timesteps = self.algo_config.ddim.num_inference_timesteps
         else:
             raise ValueError
-        
         # select network
         nets = self.nets
         if self.ema is not None:
@@ -335,7 +367,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
         }
         for k in self.obs_shapes:
             # first two dimensions should be [B, T] for inputs
-            assert inputs['obs'][k].ndim - 2 == len(self.obs_shapes[k])
+            if inputs['obs'][k].ndim - 2 != len(self.obs_shapes[k]):
+                inputs['obs'][k] = inputs['obs'][k].unsqueeze(1)
         obs_features = TensorUtils.time_distributed(inputs, self.nets['policy']['obs_encoder'], inputs_as_kwargs=True)
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]

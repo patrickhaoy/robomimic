@@ -351,7 +351,7 @@ def run_rollout(
             ac = policy(ob=ob_dict, goal=goal_dict)
 
             # play action
-            ob_dict, r, done, truncated, _ = env.step(ac)
+            ob_dict, r, done, _ = env.step(ac)
 
             # render to screen
             if render:
@@ -623,6 +623,7 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
         obs_normalization_stats = deepcopy(obs_normalization_stats)
         params["obs_normalization_stats"] = TensorUtils.to_list(obs_normalization_stats)
     if action_normalization_stats is not None:
+        assert config.train.hdf5_normalize_action
         action_normalization_stats = deepcopy(action_normalization_stats)
         params["action_normalization_stats"] = TensorUtils.to_list(action_normalization_stats)
     torch.save(params, ckpt_path)

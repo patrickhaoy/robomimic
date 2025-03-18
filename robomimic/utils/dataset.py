@@ -91,6 +91,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.hdf5_path = os.path.expandvars(os.path.expanduser(hdf5_path))
         self.hdf5_use_swmr = hdf5_use_swmr
         self.hdf5_normalize_obs = hdf5_normalize_obs
+        # self.hdf5_normalize_action = hdf5_normalize_action
         self._hdf5_file = None
 
         assert hdf5_cache_mode in ["all", "low_dim", None]
@@ -339,6 +340,10 @@ class SequenceDataset(torch.utils.data.Dataset):
             obs_normalization_stats[k]["mean"] = merged_stats[k]["mean"].astype(np.float32)
             obs_normalization_stats[k]["std"] = (np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3).astype(np.float32)
         return obs_normalization_stats
+    
+    # def normalize_action(self):
+    #     ep = self.demos[0]
+    #     action_traj = {k: self.hdf5_file["data/{}/actions".format(ep)][()].astype('float32') for k in self.action_keys}
 
     def get_obs_normalization_stats(self):
         """

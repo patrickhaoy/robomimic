@@ -167,7 +167,9 @@ def train(config, device, auto_remove_exp=False):
         obs_normalization_stats = trainset.get_obs_normalization_stats()
 
     # maybe retreve statistics for normalizing actions
-    action_normalization_stats = trainset.get_action_normalization_stats()
+    action_normalization_stats = None
+    if config.train.hdf5_normalize_action:
+        action_normalization_stats = trainset.get_action_normalization_stats()
 
     # initialize data loaders
     train_loader = DataLoader(

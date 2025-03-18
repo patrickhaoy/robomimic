@@ -509,16 +509,26 @@ class RolloutPolicy(object):
                 with a "mean" and "std" of shape (1, ...) where ... is the default
                 shape for the observation.
         """
+        # policy.nets = torch.compile(policy.nets)
         self.policy = policy
         self.obs_normalization_stats = obs_normalization_stats
         self.action_normalization_stats = action_normalization_stats
+        if self.obs_normalization_stats is not None:
+            self.obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.obs_normalization_stats), self.policy.device))
 
-    def start_episode(self):
+    def reset(self, resets):
+        """
+        Reset policy state to prepare for environment rollouts.
+        """
+        self.policy.set_eval()
+        self.policy.reset(resets)
+    
+    def start_episode(self, resets=None):
         """
         Prepare the policy to start a new rollout.
         """
         self.policy.set_eval()
-        self.policy.reset()
+        self.policy.reset(resets)
 
     def _prepare_observation(self, ob):
         """
@@ -528,16 +538,15 @@ class RolloutPolicy(object):
             ob (dict): single observation dictionary from environment (no batch dimension, 
                 and np.array values for each key)
         """
-        ob = TensorUtils.to_tensor(ob)
-        ob = TensorUtils.to_batch(ob)
-        ob = TensorUtils.to_device(ob, self.policy.device)
-        ob = TensorUtils.to_float(ob)
+        # ob = TensorUtils.to_tensor(ob)
+        # ob = TensorUtils.to_batch(ob)
+        # ob = TensorUtils.to_device(ob, self.policy.device)
+        # ob = TensorUtils.to_float(ob)
         if self.obs_normalization_stats is not None:
             # ensure obs_normalization_stats are torch Tensors on proper device
-            obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.obs_normalization_stats), self.policy.device))
             # limit normalization to obs keys being used, in case environment includes extra keys
             ob = { k : ob[k] for k in self.policy.global_config.all_obs_keys }
-            ob = ObsUtils.normalize_dict(ob, normalization_stats=obs_normalization_stats)
+            ob = ObsUtils.normalize_dict(ob, normalization_stats=self.obs_normalization_stats)
         return ob
 
     def __repr__(self):
@@ -554,10 +563,10 @@ class RolloutPolicy(object):
             goal (dict): goal observation
         """
         ob = self._prepare_observation(ob)
-        if goal is not None:
-            goal = self._prepare_observation(goal)
+        # if goal is not None:
+        #     goal = self._prepare_observation(goal)
         ac = self.policy.get_action(obs_dict=ob, goal_dict=goal)
-        ac = TensorUtils.to_numpy(ac[0])
+        # ac = TensorUtils.to_numpy(ac)
         if self.action_normalization_stats is not None:
             action_keys = self.policy.global_config.train.action_keys
             action_shapes = {k: self.action_normalization_stats[k]["offset"].shape[1:] for k in self.action_normalization_stats}

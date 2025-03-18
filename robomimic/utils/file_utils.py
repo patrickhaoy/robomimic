@@ -116,7 +116,7 @@ def get_env_metadata_from_dataset(dataset_path, ds_format="robomimic", set_env_s
     return env_meta
 
 
-def get_shape_metadata_from_dataset(dataset_path, action_keys, all_obs_keys=None, ds_format="robomimic", verbose=False):
+def get_shape_metadata_from_dataset(dataset_path, action_keys=None, all_obs_keys=None, ds_format="robomimic", verbose=False):
     """
     Retrieves shape metadata from dataset.
 
@@ -146,10 +146,12 @@ def get_shape_metadata_from_dataset(dataset_path, action_keys, all_obs_keys=None
     if ds_format == "robomimic":
         demo_id = list(f["data"].keys())[0]
         demo = f["data/{}".format(demo_id)]
-
-        for key in action_keys:
-            assert len(demo[key].shape) == 2 # shape should be (B, D)
-        action_dim = sum([demo[key].shape[1] for key in action_keys])
+        if action_keys is None:
+            action_dim = demo["actions"].shape[1]
+        else:
+            for key in action_keys:
+                assert len(demo[key].shape) == 2 # shape should be (B, D)
+            action_dim = sum([demo[key].shape[1] for key in action_keys])
         shape_meta["ac_dim"] = action_dim
 
         # observation dimensions
@@ -461,6 +463,7 @@ def policy_from_checkpoint(device=None, ckpt_path=None, ckpt_dict=None, verbose=
     # maybe restore action normalization stats
     action_normalization_stats = ckpt_dict.get("action_normalization_stats", None)
     if action_normalization_stats is not None:
+        assert config.train.hdf5_normalize_action
         for m in action_normalization_stats:
             for k in action_normalization_stats[m]:
                 action_normalization_stats[m][k] = np.array(action_normalization_stats[m][k])
