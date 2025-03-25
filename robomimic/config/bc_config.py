@@ -47,6 +47,10 @@ class BCConfig(BaseConfig):
         self.algo.gaussian.std_activation = "softplus"  # activation to use for std output from policy net
         self.algo.gaussian.low_noise_eval = True        # low-std at test-time 
 
+        # stochastic Gaussian policy with RSLRL ActorCritic settings
+        self.algo.gaussian_rslrl.enabled = False                 # whether to train a RSLRL policy
+        self.algo.gaussian_rslrl.init_std = 0.1                  # initial standard deviation
+
         # stochastic GMM policy settings
         self.algo.gmm.enabled = False                   # whether to train a GMM policy
         self.algo.gmm.num_modes = 5                     # number of GMM modes

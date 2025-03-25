@@ -1570,3 +1570,118 @@ class VAEActor(Module):
             mod = list(obs_dict.keys())[0]
             n = obs_dict[mod].shape[0]
         return self.decode(obs_dict=obs_dict, goal_dict=goal_dict, z=z, n=n)["action"]
+
+
+class RSLRLGaussianActorNetwork(Module):
+    """
+    Adapts RSL-RL's ActorCritic models to robomimic's policy interface.
+    Handles the observation dictionary conversion to flat vectors.
+    """
+    def __init__(
+        self,
+        obs_shapes,
+        ac_dim,
+        actor_layer_dims,
+        goal_shapes=None,
+        encoder_kwargs=None,
+        init_std=0.3
+    ):
+        """
+        Args:
+            obs_shapes (OrderedDict): a dictionary that maps observation keys to
+                expected shapes for observations.
+
+            ac_dim (int): dimension of action space.
+
+            actor_layer_dims ([int]): sequence of integers for the actor hidden layers sizes.
+
+            goal_shapes (OrderedDict): a dictionary that maps observation keys to
+                expected shapes for goal observations.
+
+            encoder_kwargs (dict or None): If None, results in default encoder_kwargs being applied.
+                Otherwise, should be nested dictionary containing relevant per-observation key
+                information for encoder networks.
+
+            init_std (float): initial std deviation for the action distribution.
+
+            kwargs (dict): Additional keyword arguments to pass to the actor_critic implementation.
+        """
+        super().__init__()
+
+        self.obs_shapes = obs_shapes
+        self.goal_shapes = goal_shapes if goal_shapes is not None else dict()
+        self.ac_dim = ac_dim
+        self.actor_layer_dims = actor_layer_dims
+        self.init_std = init_std
+
+        # Calculate total observation dimension
+        self.obs_dim = sum([np.prod(shape) for shape in obs_shapes.values()])
+        self.goal_dim = 0
+        if len(self.goal_shapes) > 0:
+            self.goal_dim = sum([np.prod(shape) for shape in goal_shapes.values()])
+
+        self.total_input_dim = self.obs_dim + self.goal_dim
+
+        # Create standard ActorCritic.
+        from rsl_rl.modules.actor_critic import ActorCritic
+
+        self.actor_critic = ActorCritic(
+            num_actor_obs=self.total_input_dim,
+            num_critic_obs=self.total_input_dim,
+            num_actions=self.ac_dim,
+            actor_hidden_dims=self.actor_layer_dims,
+            critic_hidden_dims=self.actor_layer_dims,
+            activation="elu",
+            init_noise_std=self.init_std
+        )
+
+    def _flatten_obs(self, obs_dict, goal_dict=None):
+        """Helper to flatten observation dictionaries into a single vector."""
+        flat_obs = []
+
+        # Process observation dictionary
+        for k in sorted(obs_dict.keys()):
+            if isinstance(obs_dict[k], torch.Tensor):
+                flat_obs.append(obs_dict[k].reshape(obs_dict[k].shape[0], -1))
+            else:
+                # Handle non-tensor case (should be rare)
+                flat_obs.append(torch.from_numpy(np.array(obs_dict[k])).reshape(1, -1))
+
+        # Process goal dictionary if provided
+        if goal_dict is not None and len(goal_dict) > 0:
+            for k in sorted(goal_dict.keys()):
+                if isinstance(goal_dict[k], torch.Tensor):
+                    flat_obs.append(goal_dict[k].reshape(goal_dict[k].shape[0], -1))
+                else:
+                    # Handle non-tensor case (should be rare)
+                    flat_obs.append(torch.from_numpy(np.array(goal_dict[k])).reshape(1, -1))
+
+        # Concatenate all observation components
+        return torch.cat(flat_obs, dim=1)
+
+    def forward(self, obs_dict, goal_dict=None):
+        """Forward pass that handles dictionary observations."""
+        flat_obs = self._flatten_obs(obs_dict, goal_dict)
+        return self.actor_critic.act_inference(flat_obs)
+
+    def get_action_distribution(self, obs_dict, goal_dict=None):
+        """Get action distribution."""
+        flat_obs = self._flatten_obs(obs_dict, goal_dict)
+        self.actor_critic.update_distribution(flat_obs)
+        return self.actor_critic.distribution
+
+    def forward_train(self, obs_dict, goal_dict=None):
+        """Method needed for GMM compatibility."""
+        flat_obs = self._flatten_obs(obs_dict, goal_dict)
+        self.actor_critic.update_distribution(flat_obs)
+        dist = self.actor_critic.distribution
+        dist = D.Independent(dist, 1)
+        return dist
+
+    def output_shape(self, input_shape=None):
+        """Implementation required by Module superclass."""
+        return [self.ac_dim]
+
+    def _to_string(self):
+        """Info to pretty print."""
+        return f"action_dim={self.ac_dim}"

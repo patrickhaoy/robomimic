@@ -36,6 +36,7 @@ def algo_config_to_class(algo_config):
     # note: we need the check below because some configs import BCConfig and exclude
     # some of these options
     gaussian_enabled = ("gaussian" in algo_config and algo_config.gaussian.enabled)
+    gaussian_rslrl_enabled = ("gaussian_rslrl" in algo_config and algo_config.gaussian_rslrl.enabled)
     gmm_enabled = ("gmm" in algo_config and algo_config.gmm.enabled)
     vae_enabled = ("vae" in algo_config and algo_config.vae.enabled)
 
@@ -49,6 +50,13 @@ def algo_config_to_class(algo_config):
             raise NotImplementedError
         else:
             algo_class, algo_kwargs = BC_Gaussian, {}
+    elif gaussian_rslrl_enabled:
+        if rnn_enabled:
+            raise NotImplementedError
+        elif transformer_enabled:
+            raise NotImplementedError
+        else:
+            algo_class, algo_kwargs = BC_Gaussian_RSLRL, {}
     elif gmm_enabled:
         if rnn_enabled:
             algo_class, algo_kwargs = BC_RNN_GMM, {}
@@ -872,3 +880,50 @@ class BC_Transformer_GMM(BC_Transformer):
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
+
+
+class BC_Gaussian_RSLRL(BC_Gaussian):
+    """
+    BC implementation that uses RSL-RL's ActorCritic network architecture,
+    inheriting from BC_Gaussian to utilize Gaussian distribution handling.
+    """
+    def _create_networks(self):
+        """
+        Creates networks using RSL-RL's ActorCritic.
+        Overrides BC_Gaussian._create_networks().
+        """
+        self.nets = nn.ModuleDict()
+
+        # Create wrapped ActorCritic
+        self.nets["policy"] = PolicyNets.RSLRLGaussianActorNetwork(
+            obs_shapes=self.obs_shapes,
+            goal_shapes=self.goal_shapes,
+            ac_dim=self.ac_dim,
+            actor_layer_dims=self.algo_config.actor_layer_dims,
+            init_std=self.algo_config.gaussian.init_std
+        )
+
+        self.nets = self.nets.float().to(self.device)
+
+        self.rsl_rl = True
+
+    def _forward_training(self, batch):
+        """
+        Internal helper function for BC algo class. Compute forward pass
+        and return network outputs in @predictions dict.
+        Overridden to use the forward_train method of our wrapper.
+        """
+        dists = self.nets["policy"].forward_train(
+            obs_dict=batch["obs"], 
+            goal_dict=batch["goal_obs"],
+        )
+
+        # make sure that this is a batch of multivariate action distributions, so that
+        # the log probability computation will be correct
+        assert len(dists.batch_shape) == 1
+        log_probs = dists.log_prob(batch["actions"])
+
+        predictions = OrderedDict(
+            log_probs=log_probs,
+        )
+        return predictions
