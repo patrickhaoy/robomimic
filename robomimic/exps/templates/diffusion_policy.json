@@ -43,6 +43,7 @@
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
         "hdf5_normalize_obs": false,
+        "hdf5_normalize_action": false,
         "hdf5_filter_key": null,
         "seq_length": 15,
         "pad_seq_length": true,

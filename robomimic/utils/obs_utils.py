@@ -1027,3 +1027,47 @@ class LowDimModality(Modality):
     @classmethod
     def _default_obs_unprocessor(cls, obs):
         return obs
+
+def normalize_obs(obs_dict, obs_normalization_stats):
+    """
+    Normalize observations using the provided "mean" and "std" entries 
+    for each observation key. The observation dictionary will be
+    modified in-place.
+
+    Args:
+        obs_dict (dict): dictionary mapping observation key to np.array or
+            torch.Tensor. Can have any number of leading batch dimensions.
+
+        obs_normalization_stats (dict): this should map observation keys to dicts
+            with a "mean" and "std" of shape (1, ...) where ... is the default
+            shape for the observation.
+
+    Returns:
+        obs_dict (dict): obs dict with normalized observation arrays
+    """
+
+    # ensure we have statistics for each modality key in the observation
+    assert set(obs_dict.keys()).issubset(obs_normalization_stats)
+
+    for m in obs_dict:
+        # get rid of extra dimension - we will pad for broadcasting later
+        mean = obs_normalization_stats[m]["mean"][0]
+        std = obs_normalization_stats[m]["std"][0]
+
+        # shape consistency checks
+        m_num_dims = len(mean.shape)
+        shape_len_diff = len(obs_dict[m].shape) - m_num_dims
+        assert shape_len_diff >= 0, "shape length mismatch in @normalize_obs"
+        assert obs_dict[m].shape[-m_num_dims:] == mean.shape, "shape mismatch in @normalize_obs"
+
+        # Obs can have one or more leading batch dims - prepare for broadcasting.
+        # 
+        # As an example, if the obs has shape [B, T, D] and our mean / std stats are shape [D]
+        # then we should pad the stats to shape [1, 1, D].
+        reshape_padding = tuple([1] * shape_len_diff)
+        mean = mean.reshape(reshape_padding + tuple(mean.shape))
+        std = std.reshape(reshape_padding + tuple(std.shape))
+
+        obs_dict[m] = (obs_dict[m] - mean) / std
+
+    return obs_dict

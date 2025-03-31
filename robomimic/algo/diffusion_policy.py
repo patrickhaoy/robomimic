@@ -144,7 +144,6 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # check if actions are normalized to [-1,1]
         if not self.action_check_done:
             actions = input_batch["actions"]
-            actions = torch.clip(actions, -1, 1)
             in_range = (-1 <= actions) & (actions <= 1)
             all_in_range = torch.all(in_range).item()
             if not all_in_range:

@@ -271,7 +271,7 @@ class Algo(object):
                     if d[k] is not None:
                         d[k] = ObsUtils.process_obs_dict(d[k])
                         if obs_normalization_stats is not None:
-                            d[k] = ObsUtils.normalize_dict(d[k], obs_normalization_stats=obs_normalization_stats)
+                            d[k] = ObsUtils.normalize_obs(d[k], obs_normalization_stats=obs_normalization_stats)
                 elif isinstance(d[k], dict):
                     # search down into dictionary
                     recurse_helper(d[k])
@@ -515,6 +515,8 @@ class RolloutPolicy(object):
         self.action_normalization_stats = action_normalization_stats
         if self.obs_normalization_stats is not None:
             self.obs_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.obs_normalization_stats), self.policy.device))
+        if self.action_normalization_stats is not None:
+            self.action_normalization_stats = TensorUtils.to_float(TensorUtils.to_device(TensorUtils.to_tensor(self.action_normalization_stats), self.policy.device))
 
     def reset(self, resets):
         """
@@ -546,14 +548,14 @@ class RolloutPolicy(object):
             # ensure obs_normalization_stats are torch Tensors on proper device
             # limit normalization to obs keys being used, in case environment includes extra keys
             ob = { k : ob[k] for k in self.policy.global_config.all_obs_keys }
-            ob = ObsUtils.normalize_dict(ob, normalization_stats=self.obs_normalization_stats)
+            ob = ObsUtils.normalize_obs(ob, obs_normalization_stats=self.obs_normalization_stats)
         return ob
 
     def __repr__(self):
         """Pretty print network description"""
         return self.policy.__repr__()
 
-    def __call__(self, ob, goal=None):
+    def __call__(self, ob, goal=None, denormalize=True):
         """
         Produce action from raw observation dict (and maybe goal dict) from environment.
 
@@ -567,7 +569,7 @@ class RolloutPolicy(object):
         #     goal = self._prepare_observation(goal)
         ac = self.policy.get_action(obs_dict=ob, goal_dict=goal)
         # ac = TensorUtils.to_numpy(ac)
-        if self.action_normalization_stats is not None:
+        if denormalize and self.action_normalization_stats is not None:
             action_keys = self.policy.global_config.train.action_keys
             action_shapes = {k: self.action_normalization_stats[k]["offset"].shape[1:] for k in self.action_normalization_stats}
             ac_dict = AcUtils.vector_to_action_dict(ac, action_shapes=action_shapes, action_keys=action_keys)
@@ -580,4 +582,19 @@ class RolloutPolicy(object):
                     rot = TorchUtils.rot_6d_to_axis_angle(rot_6d=rot_6d).squeeze().numpy()
                     ac_dict[key] = rot
             ac = AcUtils.action_dict_to_vector(ac_dict, action_keys=action_keys)
+        return ac
+
+    def denormalize(self, ac):
+        action_keys = self.policy.global_config.train.action_keys
+        action_shapes = {k: self.action_normalization_stats[k]["offset"].shape[1:] for k in self.action_normalization_stats}
+        ac_dict = AcUtils.vector_to_action_dict(ac, action_shapes=action_shapes, action_keys=action_keys)
+        ac_dict = ObsUtils.unnormalize_dict(ac_dict, normalization_stats=self.action_normalization_stats)
+        action_config = self.policy.global_config.train.action_config
+        for key, value in ac_dict.items():
+            this_format = action_config[key].get('format', None)
+            if this_format == 'rot_6d':
+                rot_6d = torch.from_numpy(value).unsqueeze(0)
+                rot = TorchUtils.rot_6d_to_axis_angle(rot_6d=rot_6d).squeeze().numpy()
+                ac_dict[key] = rot
+        ac = AcUtils.action_dict_to_vector(ac_dict, action_keys=action_keys)
         return ac
