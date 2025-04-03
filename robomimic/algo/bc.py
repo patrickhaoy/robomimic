@@ -900,7 +900,7 @@ class BC_Gaussian_RSLRL(BC_Gaussian):
             goal_shapes=self.goal_shapes,
             ac_dim=self.ac_dim,
             actor_layer_dims=self.algo_config.actor_layer_dims,
-            init_std=self.algo_config.gaussian.init_std
+            rslrl_kwargs=self.algo_config.gaussian_rslrl.rslrl_kwargs
         )
 
         self.nets = self.nets.float().to(self.device)

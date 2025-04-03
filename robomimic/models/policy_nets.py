@@ -1584,7 +1584,7 @@ class RSLRLGaussianActorNetwork(Module):
         actor_layer_dims,
         goal_shapes=None,
         encoder_kwargs=None,
-        init_std=0.3
+        rslrl_kwargs=dict(),
     ):
         """
         Args:
@@ -1602,9 +1602,7 @@ class RSLRLGaussianActorNetwork(Module):
                 Otherwise, should be nested dictionary containing relevant per-observation key
                 information for encoder networks.
 
-            init_std (float): initial std deviation for the action distribution.
-
-            kwargs (dict): Additional keyword arguments to pass to the actor_critic implementation.
+            rslrl_kwargs (dict): additional arguments to pass to the RSL-RL ActorCriticDict
         """
         super().__init__()
 
@@ -1612,68 +1610,47 @@ class RSLRLGaussianActorNetwork(Module):
         self.goal_shapes = goal_shapes if goal_shapes is not None else dict()
         self.ac_dim = ac_dim
         self.actor_layer_dims = actor_layer_dims
-        self.init_std = init_std
+        self.rslrl_kwargs = rslrl_kwargs
 
         # Calculate total observation dimension
-        self.obs_dim = sum([np.prod(shape) for shape in obs_shapes.values()])
-        self.goal_dim = 0
-        if len(self.goal_shapes) > 0:
-            self.goal_dim = sum([np.prod(shape) for shape in goal_shapes.values()])
-
-        self.total_input_dim = self.obs_dim + self.goal_dim
+        self.total_input_shapes = {**obs_shapes, **goal_shapes}
 
         # Create standard ActorCritic.
-        from rsl_rl.modules.actor_critic import ActorCritic
+        from source.standalone.workflows.rl.framework_rslrl.ext.modules.actor_critic_dict import ActorCriticDict
 
-        self.actor_critic = ActorCritic(
-            num_actor_obs=self.total_input_dim,
-            num_critic_obs=self.total_input_dim,
+        self.actor_critic = ActorCriticDict(
+            actor_observation_shapes=self.total_input_shapes,
+            critic_observation_shapes=self.total_input_shapes,
             num_actions=self.ac_dim,
             actor_hidden_dims=self.actor_layer_dims,
             critic_hidden_dims=self.actor_layer_dims,
-            activation="elu",
-            init_noise_std=self.init_std
+            **self.rslrl_kwargs
         )
-
-    def _flatten_obs(self, obs_dict, goal_dict=None):
-        """Helper to flatten observation dictionaries into a single vector."""
-        flat_obs = []
-
-        # Process observation dictionary
-        for k in sorted(obs_dict.keys()):
-            if isinstance(obs_dict[k], torch.Tensor):
-                flat_obs.append(obs_dict[k].reshape(obs_dict[k].shape[0], -1))
-            else:
-                # Handle non-tensor case (should be rare)
-                flat_obs.append(torch.from_numpy(np.array(obs_dict[k])).reshape(1, -1))
-
-        # Process goal dictionary if provided
-        if goal_dict is not None and len(goal_dict) > 0:
-            for k in sorted(goal_dict.keys()):
-                if isinstance(goal_dict[k], torch.Tensor):
-                    flat_obs.append(goal_dict[k].reshape(goal_dict[k].shape[0], -1))
-                else:
-                    # Handle non-tensor case (should be rare)
-                    flat_obs.append(torch.from_numpy(np.array(goal_dict[k])).reshape(1, -1))
-
-        # Concatenate all observation components
-        return torch.cat(flat_obs, dim=1)
 
     def forward(self, obs_dict, goal_dict=None):
         """Forward pass that handles dictionary observations."""
-        flat_obs = self._flatten_obs(obs_dict, goal_dict)
-        return self.actor_critic.act_inference(flat_obs)
+        if goal_dict is not None:
+            input_dict = {**obs_dict, **goal_dict}
+        else:
+            input_dict = obs_dict
+        return self.actor_critic.act_inference(input_dict)
 
     def get_action_distribution(self, obs_dict, goal_dict=None):
         """Get action distribution."""
-        flat_obs = self._flatten_obs(obs_dict, goal_dict)
-        self.actor_critic.update_distribution(flat_obs)
+        if goal_dict is not None:
+            input_dict = {**obs_dict, **goal_dict}
+        else:
+            input_dict = obs_dict
+        self.actor_critic.update_distribution(input_dict)
         return self.actor_critic.distribution
 
     def forward_train(self, obs_dict, goal_dict=None):
         """Method needed for GMM compatibility."""
-        flat_obs = self._flatten_obs(obs_dict, goal_dict)
-        self.actor_critic.update_distribution(flat_obs)
+        if goal_dict is not None:
+            input_dict = {**obs_dict, **goal_dict}
+        else:
+            input_dict = obs_dict
+        self.actor_critic.update_distribution(input_dict)
         dist = self.actor_critic.distribution
         dist = D.Independent(dist, 1)
         return dist

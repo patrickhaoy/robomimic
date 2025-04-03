@@ -49,7 +49,7 @@ class BCConfig(BaseConfig):
 
         # stochastic Gaussian policy with RSLRL ActorCritic settings
         self.algo.gaussian_rslrl.enabled = False                 # whether to train a RSLRL policy
-        self.algo.gaussian_rslrl.init_std = 0.1                  # initial standard deviation
+        self.algo.gaussian_rslrl.rslrl_kwargs = {}              # kwargs for RSLRL actor-critic
 
         # stochastic GMM policy settings
         self.algo.gmm.enabled = False                   # whether to train a GMM policy
