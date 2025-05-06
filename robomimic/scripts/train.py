@@ -10,7 +10,8 @@ Args:
 
     name (str): if provided, override the experiment name defined in the config
 
-    dataset (str): if provided, override the dataset path defined in the config
+    dataset (str): if provided, override the dataset path defined in the config. Can be a single file,
+        multiple files, or a directory containing HDF5 files.
 
     debug (bool): set this flag to run a quick training run for debugging purposes    
 """
@@ -25,11 +26,12 @@ import psutil
 import sys
 import socket
 import traceback
+from copy import deepcopy
 
 from collections import OrderedDict
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 import robomimic
 import robomimic.macros as Macros
@@ -41,6 +43,25 @@ import robomimic.utils.file_utils as FileUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
+
+
+def scan_datasets(folder, postfix=".hdf5"):
+    """
+    Recursively scan a folder for HDF5 files.
+
+    Args:
+        folder (str): path to folder to scan
+        postfix (str): file extension to look for
+
+    Returns:
+        list: list of paths to HDF5 files
+    """
+    dataset_paths = []
+    for root, dirs, files in os.walk(os.path.expanduser(folder)):
+        for f in files:
+            if f.endswith(postfix):
+                dataset_paths.append(os.path.join(root, f))
+    return dataset_paths
 
 
 def train(config, device, auto_remove_exp=False):
@@ -71,26 +92,49 @@ def train(config, device, auto_remove_exp=False):
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
     ObsUtils.initialize_obs_utils_with_config(config)
 
-    # make sure the dataset exists
+    # make sure the dataset exists and handle directories
     if isinstance(config.train.data, str):
         dataset_path = os.path.expandvars(os.path.expanduser(config.train.data))
+        if os.path.isdir(dataset_path):
+            # If it's a directory, scan for HDF5 files
+            dataset_paths = scan_datasets(dataset_path)
+            if not dataset_paths:
+                raise Exception("No HDF5 files found in directory: {}".format(dataset_path))
+            print("Found {} HDF5 files in directory: {}".format(len(dataset_paths), dataset_path))
+        else:
+            dataset_paths = [dataset_path]
     else:
-        eval_dataset_cfg = config.train.data[0]
-        dataset_path = os.path.expandvars(os.path.expanduser(eval_dataset_cfg["path"]))
-    ds_format = config.train.data_format
-    if not os.path.exists(dataset_path):
-        raise Exception("Dataset at provided path {} not found!".format(dataset_path))
+        dataset_paths = []
+        for dataset_cfg in config.train.data:
+            path = os.path.expandvars(os.path.expanduser(dataset_cfg["path"]))
+            if os.path.isdir(path):
+                # If it's a directory, scan for HDF5 files
+                dir_paths = scan_datasets(path)
+                if not dir_paths:
+                    raise Exception("No HDF5 files found in directory: {}".format(path))
+                print("Found {} HDF5 files in directory: {}".format(len(dir_paths), path))
+                dataset_paths.extend(dir_paths)
+            else:
+                dataset_paths.append(path)
 
-    # load basic metadata from training file
+    ds_format = config.train.data_format
+    for dataset_path in dataset_paths:
+        if not os.path.exists(dataset_path):
+            raise Exception("Dataset at provided path {} not found!".format(dataset_path))
+
+    # load basic metadata from first training file
     print("\n============= Loaded Environment Metadata =============")
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=dataset_path, ds_format=ds_format)
+    env_meta = FileUtils.get_env_metadata_from_dataset(
+        dataset_path=dataset_paths[0], 
+        ds_format=ds_format
+    )
 
     # update env meta if applicable
     from robomimic.utils.script_utils import deep_update
     deep_update(env_meta, config.experiment.env_meta_update_dict)
 
     shape_meta = FileUtils.get_shape_metadata_from_dataset(
-        dataset_path=dataset_path,
+        dataset_path=dataset_paths[0],
         action_keys=config.train.action_keys,
         all_obs_keys=config.all_obs_keys,
         ds_format=ds_format,
@@ -140,7 +184,7 @@ def train(config, device, auto_remove_exp=False):
         ac_dim=shape_meta["ac_dim"],
         device=device,
     )
-    
+
     # save the config as a json file
     with open(os.path.join(log_dir, '..', 'config.json'), 'w') as outfile:
         json.dump(config, outfile, indent=4)
@@ -150,9 +194,98 @@ def train(config, device, auto_remove_exp=False):
     print("")
 
     # load training data
-    trainset, validset = TrainUtils.load_data_for_training(
-        config, obs_keys=shape_meta["all_obs_keys"])
-    train_sampler = trainset.get_dataset_sampler()
+    trainsets = []
+    validsets = []
+    all_obs_stats = []
+    all_action_stats = []
+    
+    for dataset_path in dataset_paths:
+        # Create a temporary config for this dataset
+        temp_config = deepcopy(config)
+        temp_config.train.data = dataset_path
+        
+        # Load dataset using dataset_factory
+        train_dataset = TrainUtils.dataset_factory(
+            config=temp_config,
+            obs_keys=shape_meta["all_obs_keys"],
+            filter_by_attribute=config.train.hdf5_filter_key
+        )
+        trainsets.append(train_dataset)
+        
+        if config.experiment.validate:
+            valid_dataset = TrainUtils.dataset_factory(
+                config=temp_config,
+                obs_keys=shape_meta["all_obs_keys"],
+                filter_by_attribute=config.train.hdf5_validation_filter_key
+            )
+            validsets.append(valid_dataset)
+            
+        # Collect normalization stats from each dataset
+        if config.train.hdf5_normalize_obs:
+            all_obs_stats.append(train_dataset.get_obs_normalization_stats())
+        if config.train.hdf5_normalize_action:
+            all_action_stats.append(train_dataset.get_action_normalization_stats())
+    
+    # Combine datasets if multiple are provided
+    trainset = (ConcatDataset(trainsets) if len(trainsets) > 1 
+               else trainsets[0])
+    validset = (ConcatDataset(validsets) if len(validsets) > 1 
+                else (validsets[0] if validsets else None))
+    
+    # Compute combined normalization stats if needed
+    obs_normalization_stats = None
+    if config.train.hdf5_normalize_obs:
+        if len(all_obs_stats) == 1:
+            obs_normalization_stats = all_obs_stats[0]
+        else:
+            # Combine stats from all datasets
+            obs_normalization_stats = {}
+            # Get dataset sizes for weighting
+            dataset_sizes = [len(dataset) for dataset in trainsets]
+            total_size = sum(dataset_sizes)
+            weights = [size / total_size for size in dataset_sizes]
+            
+            for key in all_obs_stats[0].keys():
+                # Weight and combine stats from all datasets
+                weighted_means = np.zeros_like(all_obs_stats[0][key]["mean"])
+                weighted_stds = np.zeros_like(all_obs_stats[0][key]["std"])
+                
+                for i, stats in enumerate(all_obs_stats):
+                    weighted_means += stats[key]["mean"] * weights[i]
+                    weighted_stds += stats[key]["std"] * weights[i]
+                
+                obs_normalization_stats[key] = {
+                    "mean": weighted_means,
+                    "std": weighted_stds
+                }
+    
+    action_normalization_stats = None
+    if config.train.hdf5_normalize_action:
+        if len(all_action_stats) == 1:
+            action_normalization_stats = all_action_stats[0]
+        else:
+            # Combine stats from all datasets
+            action_normalization_stats = OrderedDict()
+            # Get dataset sizes for weighting
+            dataset_sizes = [len(dataset) for dataset in trainsets]
+            total_size = sum(dataset_sizes)
+            weights = [size / total_size for size in dataset_sizes]
+            
+            for key in all_action_stats[0].keys():
+                # Weight and combine stats from all datasets
+                weighted_scales = np.zeros_like(all_action_stats[0][key]["scale"])
+                weighted_offsets = np.zeros_like(all_action_stats[0][key]["offset"])
+                
+                for i, stats in enumerate(all_action_stats):
+                    weighted_scales += stats[key]["scale"] * weights[i]
+                    weighted_offsets += stats[key]["offset"] * weights[i]
+                
+                action_normalization_stats[key] = {
+                    "scale": weighted_scales,
+                    "offset": weighted_offsets
+                }
+
+    train_sampler = trainset.get_dataset_sampler() if hasattr(trainset, 'get_dataset_sampler') else None
     print("\n============= Training Dataset =============")
     print(trainset)
     print("")
@@ -160,16 +293,6 @@ def train(config, device, auto_remove_exp=False):
         print("\n============= Validation Dataset =============")
         print(validset)
         print("")
-
-    # maybe retreve statistics for normalizing observations
-    obs_normalization_stats = None
-    if config.train.hdf5_normalize_obs:
-        obs_normalization_stats = trainset.get_obs_normalization_stats()
-
-    # maybe retreve statistics for normalizing actions
-    action_normalization_stats = None
-    if config.train.hdf5_normalize_action:
-        action_normalization_stats = trainset.get_action_normalization_stats()
 
     # initialize data loaders
     train_loader = DataLoader(
@@ -184,7 +307,7 @@ def train(config, device, auto_remove_exp=False):
     if config.experiment.validate:
         # cap num workers for validation dataset at 1
         num_workers = min(config.train.num_data_workers, 1)
-        valid_sampler = validset.get_dataset_sampler()
+        valid_sampler = validset.get_dataset_sampler() if hasattr(validset, 'get_dataset_sampler') else None
         valid_loader = DataLoader(
             dataset=validset,
             sampler=valid_sampler,
@@ -473,7 +596,8 @@ def main(args):
         config = config_factory(args.algo)
 
     if args.dataset is not None:
-        config.train.data = [dict(path=args.dataset)]
+        # Convert single dataset path to list format expected by config
+        config.train.data = [dict(path=path) for path in args.dataset]
 
     if args.name is not None:
         config.experiment.name = args.name
@@ -539,7 +663,7 @@ def main(args):
         give_slack_notif(msg)
 
 
-if __name__ == "__main__":
+def get_parser():
     parser = argparse.ArgumentParser()
 
     # External config file that overwrites default config
@@ -570,8 +694,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
+        nargs='+',  # Allow multiple dataset paths
         default=None,
-        help="(optional) if provided, override the dataset path defined in the config",
+        help="(optional) if provided, override the dataset path(s) defined in the config. Can provide multiple paths.",
     )
 
     # Output path, to override the one in the config
@@ -596,6 +721,10 @@ if __name__ == "__main__":
         help="set this flag to run a quick training run for debugging purposes"
     )
 
+    return parser
+
+
+if __name__ == "__main__":
+    parser = get_parser()
     args = parser.parse_args()
     main(args)
-

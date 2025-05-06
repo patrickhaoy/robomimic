@@ -41,6 +41,9 @@ class PrintLogger(object):
         # you might want to specify some extra behavior here.
         pass
 
+    def isatty(self):
+        return self.terminal.isatty()
+
 
 class DataLogger(object):
     """
