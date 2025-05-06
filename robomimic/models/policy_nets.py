@@ -1616,7 +1616,7 @@ class RSLRLGaussianActorNetwork(Module):
         self.total_input_shapes = {**obs_shapes, **goal_shapes}
 
         # Create standard ActorCritic.
-        from source.standalone.workflows.rl.framework_rslrl.ext.modules.actor_critic_dict import ActorCriticDict
+        from octilab_rl.rsl_rl.ext.modules.actor_critic_dict import ActorCriticDict
 
         self.actor_critic = ActorCriticDict(
             actor_observation_shapes=self.total_input_shapes,
