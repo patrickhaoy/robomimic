@@ -791,19 +791,45 @@ class ShallowConv(ConvBase):
     """
     A shallow convolutional encoder from https://rll.berkeley.edu/dsae/dsae.pdf
     """
-    def __init__(self, input_channel=3, output_channel=32):
+    def __init__(self, input_shape=(3, 224, 224)): #, output_channel=32):
         super(ShallowConv, self).__init__()
-        self._input_channel = input_channel
-        self._output_channel = output_channel
-        self.nets = nn.Sequential(
-            torch.nn.Conv2d(input_channel, 64, kernel_size=7, stride=2, padding=3),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 32, kernel_size=1, stride=1, padding=0),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-        )
+        self._input_shape = input_shape
+        self._input_channel = input_shape[0]
+        # self._output_channel = output_channel
+
+        # Build convolutional backbone
+        conv_layers = [
+            nn.Conv2d(self._input_channel, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Flatten(),
+        ]
+
+        # Final sequential network (only conv + activation + pooling)
+        self.nets = nn.Sequential(*conv_layers)
+
+        # Compute output feature map shape dynamically
+        with torch.no_grad():
+            dummy = torch.zeros(1, *self._input_shape)
+            out = self.nets(dummy)
+            # out shape: [1, C_out, H_out, W_out]
+            self._out_shape = list(out.shape[1:])  # [C, H, W]
+
+        # self.nets = nn.Sequential(
+        #     torch.nn.Conv2d(input_channel, 64, kernel_size=7, stride=2, padding=3),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Conv2d(64, 32, kernel_size=1, stride=1, padding=0),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+        # )
 
     def output_shape(self, input_shape):
         """
@@ -819,9 +845,10 @@ class ShallowConv(ConvBase):
         """
         assert(len(input_shape) == 3)
         assert(input_shape[0] == self._input_channel)
-        out_h = int(math.floor(input_shape[1] / 2.))
-        out_w = int(math.floor(input_shape[2] / 2.))
-        return [self._output_channel, out_h, out_w]
+        return self._out_shape
+        # out_h = int(math.floor(input_shape[1] / 2.))
+        # out_w = int(math.floor(input_shape[2] / 2.))
+        # return [self._output_channel, out_h, out_w]
 
 
 class Conv1dBase(Module):
