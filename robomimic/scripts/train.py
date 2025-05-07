@@ -43,6 +43,7 @@ import robomimic.utils.file_utils as FileUtils
 from robomimic.config import config_factory
 from robomimic.algo import algo_factory, RolloutPolicy
 from robomimic.utils.log_utils import PrintLogger, DataLogger, flush_warnings
+import h5py
 
 
 def scan_datasets(folder, postfix=".hdf5"):
@@ -62,6 +63,47 @@ def scan_datasets(folder, postfix=".hdf5"):
             if f.endswith(postfix):
                 dataset_paths.append(os.path.join(root, f))
     return dataset_paths
+
+
+def load_normalization_stats(dataset_path):
+    """
+    Load normalization stats from HDF5 file if they exist.
+
+    Args:
+        dataset_path (str): path to HDF5 dataset
+
+    Returns:
+        tuple: (obs_normalization_stats, action_normalization_stats) or (None, None) if not found
+    """
+    try:
+        with h5py.File(dataset_path, 'r') as f:
+            if 'normalization_stats' not in f:
+                return None, None
+
+            stats = f['normalization_stats']
+            obs_stats = None
+            action_stats = None
+
+            if 'obs' in stats:
+                obs_stats = {}
+                for obs_key in stats['obs']:
+                    obs_stats[obs_key] = {
+                        'mean': stats['obs'][obs_key]['mean'][:],
+                        'std': stats['obs'][obs_key]['std'][:]
+                    }
+
+            if 'actions' in stats:
+                action_stats = OrderedDict()
+                for action_key in stats['actions']:
+                    action_stats[action_key] = {
+                        'scale': stats['actions'][action_key]['scale'][:],
+                        'offset': stats['actions'][action_key]['offset'][:]
+                    }
+
+            return obs_stats, action_stats
+    except Exception as e:
+        print(f"Warning: Could not load normalization stats from {dataset_path}: {e}")
+        return None, None
 
 
 def train(config, device, auto_remove_exp=False):
@@ -198,12 +240,15 @@ def train(config, device, auto_remove_exp=False):
     validsets = []
     all_obs_stats = []
     all_action_stats = []
-    
+
     for dataset_path in dataset_paths:
         # Create a temporary config for this dataset
         temp_config = deepcopy(config)
         temp_config.train.data = dataset_path
-        
+
+        # Try to load pre-computed normalization stats
+        obs_stats, action_stats = load_normalization_stats(dataset_path)
+
         # Load dataset using dataset_factory
         train_dataset = TrainUtils.dataset_factory(
             config=temp_config,
@@ -211,7 +256,7 @@ def train(config, device, auto_remove_exp=False):
             filter_by_attribute=config.train.hdf5_filter_key
         )
         trainsets.append(train_dataset)
-        
+
         if config.experiment.validate:
             valid_dataset = TrainUtils.dataset_factory(
                 config=temp_config,
@@ -219,19 +264,30 @@ def train(config, device, auto_remove_exp=False):
                 filter_by_attribute=config.train.hdf5_validation_filter_key
             )
             validsets.append(valid_dataset)
-            
-        # Collect normalization stats from each dataset
+
+        # Use pre-computed stats if available, otherwise compute them
         if config.train.hdf5_normalize_obs:
-            all_obs_stats.append(train_dataset.get_obs_normalization_stats())
+            if obs_stats is not None:
+                print(f"Using pre-computed observation normalization stats from {dataset_path}")
+                all_obs_stats.append(obs_stats)
+            else:
+                print(f"Computing observation normalization stats for {dataset_path}")
+                all_obs_stats.append(train_dataset.get_obs_normalization_stats())
+
         if config.train.hdf5_normalize_action:
-            all_action_stats.append(train_dataset.get_action_normalization_stats())
-    
+            if action_stats is not None:
+                print(f"Using pre-computed action normalization stats from {dataset_path}")
+                all_action_stats.append(action_stats)
+            else:
+                print(f"Computing action normalization stats for {dataset_path}")
+                all_action_stats.append(train_dataset.get_action_normalization_stats())
+
     # Combine datasets if multiple are provided
     trainset = (ConcatDataset(trainsets) if len(trainsets) > 1 
                else trainsets[0])
     validset = (ConcatDataset(validsets) if len(validsets) > 1 
                 else (validsets[0] if validsets else None))
-    
+
     # Compute combined normalization stats if needed
     obs_normalization_stats = None
     if config.train.hdf5_normalize_obs:
@@ -244,21 +300,21 @@ def train(config, device, auto_remove_exp=False):
             dataset_sizes = [len(dataset) for dataset in trainsets]
             total_size = sum(dataset_sizes)
             weights = [size / total_size for size in dataset_sizes]
-            
+
             for key in all_obs_stats[0].keys():
                 # Weight and combine stats from all datasets
                 weighted_means = np.zeros_like(all_obs_stats[0][key]["mean"])
                 weighted_stds = np.zeros_like(all_obs_stats[0][key]["std"])
-                
+
                 for i, stats in enumerate(all_obs_stats):
                     weighted_means += stats[key]["mean"] * weights[i]
                     weighted_stds += stats[key]["std"] * weights[i]
-                
+
                 obs_normalization_stats[key] = {
                     "mean": weighted_means,
                     "std": weighted_stds
                 }
-    
+
     action_normalization_stats = None
     if config.train.hdf5_normalize_action:
         if len(all_action_stats) == 1:
@@ -270,16 +326,16 @@ def train(config, device, auto_remove_exp=False):
             dataset_sizes = [len(dataset) for dataset in trainsets]
             total_size = sum(dataset_sizes)
             weights = [size / total_size for size in dataset_sizes]
-            
+
             for key in all_action_stats[0].keys():
                 # Weight and combine stats from all datasets
                 weighted_scales = np.zeros_like(all_action_stats[0][key]["scale"])
                 weighted_offsets = np.zeros_like(all_action_stats[0][key]["offset"])
-                
+
                 for i, stats in enumerate(all_action_stats):
                     weighted_scales += stats[key]["scale"] * weights[i]
                     weighted_offsets += stats[key]["offset"] * weights[i]
-                
+
                 action_normalization_stats[key] = {
                     "scale": weighted_scales,
                     "offset": weighted_offsets
