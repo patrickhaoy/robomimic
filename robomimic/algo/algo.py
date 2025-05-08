@@ -530,7 +530,10 @@ class RolloutPolicy(object):
         Prepare the policy to start a new rollout.
         """
         self.policy.set_eval()
-        self.policy.reset(resets)
+        try:
+            self.policy.reset(resets)
+        except TypeError:
+            self.policy.reset()
 
     def _prepare_observation(self, ob):
         """
