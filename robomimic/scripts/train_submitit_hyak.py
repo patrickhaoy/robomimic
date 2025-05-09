@@ -40,7 +40,7 @@ def job_fn(job_cfg: ArgumentsConfig):
     sys.argv = [
         "script.py",  # dummy placeholder for program name
         "--config", f"robomimic/exps/templates/{job_cfg.config}.json",
-        "--name", f"{job_cfg.config}_v1",
+        "--name", f"{job_cfg.config}_v2",
         "--dataset", f"/tmp/datasets_{job_cfg.config}"
     ]
 
