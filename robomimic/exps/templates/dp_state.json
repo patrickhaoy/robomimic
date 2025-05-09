@@ -45,15 +45,15 @@
         "hdf5_normalize_action": true, 
         "hdf5_filter_key": "train",
         "hdf5_load_next_obs": false,
-        "seq_length": 15,
-        "pad_seq_length": true,
+        "seq_length": 3,
+        "pad_seq_length": false,
         "frame_stack": 2,
         "dataset_keys": [
             "actions"
         ],
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 256,
+        "batch_size": 64,
         "num_epochs": 100000,
         "seed": 1,
         "action_config": {
@@ -77,8 +77,8 @@
         },
         "horizon": {
             "observation_horizon": 2,
-            "action_horizon": 8,
-            "prediction_horizon": 16
+            "action_horizon": 2,
+            "prediction_horizon": 4
         },
         "unet": {
             "enabled": true,

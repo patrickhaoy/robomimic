@@ -45,7 +45,7 @@
         "hdf5_normalize_action": true,
         "hdf5_filter_key": "train",
         "hdf5_load_next_obs": false,
-        "seq_length": 15,
+        "seq_length": 1,
         "pad_seq_length": true,
         "frame_stack": 2,
         "pad_frame_stack": true,
@@ -54,7 +54,7 @@
         ],
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 256,
+        "batch_size": 64,
         "num_epochs": 100000,
         "seed": 1,
         "action_config": {
