@@ -19,7 +19,7 @@ class ExampleExecutorConfig(SubmititExecutorConfig):
 class ArgumentsConfig(BaseJobConfig):
     config: str = "dp_rgb"
 
-job_configs = [ArgumentsConfig(config=config) for config in ["dp_rgb", "mlp_rgb", "mlp_rgb_cnn", "mlp_rgb_r3m"]]
+job_configs = [ArgumentsConfig(config=config) for config in ["mlp_rgb_r3m", "mlp_rgb_dinov2", "mlp_rgb_r3m_finetune"]] #"dp_rgb", "mlp_rgb", "mlp_rgb_cnn", 
 
 # # Since we do not need any checkpointing functionality, and the jobs will 
 # # not use the checkpoint path at all, we can use the base config.

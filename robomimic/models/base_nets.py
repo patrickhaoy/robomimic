@@ -703,6 +703,95 @@ class MVPConv(ConvBase):
         return header + '(input_channel={}, input_coord_conv={}, pretrained={}, freeze={})'.format(self._input_channel, self._input_coord_conv, self._pretrained, self._freeze)
 
 
+class DINOv2Conv(ConvBase):
+    """
+    Base class for ConvNets pretrained with DINOv2 (https://arxiv.org/abs/2304.07193)
+    """
+    def __init__(
+        self,
+        input_channel=3,
+        dinov2_model_class='dinov2_vitb14',
+        freeze=True,
+    ):
+        """
+        Using DINOv2 pretrained observation encoder network proposed by https://arxiv.org/abs/2304.07193
+        Args:
+            input_channel (int): number of input channels for input images to the network.
+                If not equal to 3, modifies first conv layer in ResNet to handle the number
+                of input channels.
+            dinov2_model_class (str): select one of the dinov2 pretrained model "dinov2_vits14", 
+                "dinov2_vitb14", "dinov2_vitl14", or "dinov2_vitg14"
+            freeze (bool): if True, use a frozen DINOv2 pretrained model.
+        """
+        super(DINOv2Conv, self).__init__()
+
+        try:
+            import torch.hub
+            from torchvision import transforms
+        except ImportError:
+            print("WARNING: could not load torch.hub! Please make sure PyTorch is installed correctly.")
+
+        # Load DINOv2 model
+        self.nets = torch.hub.load('facebookresearch/dinov2', dinov2_model_class)
+        if freeze:
+            for param in self.nets.parameters():
+                param.requires_grad = False
+
+        assert input_channel == 3  # DINOv2 only supports input image with channel size 3
+        assert dinov2_model_class in ["dinov2_vits14", "dinov2_vitb14", "dinov2_vitl14", "dinov2_vitg14"]
+
+        self._input_channel = input_channel
+        self._freeze = freeze
+        self._dinov2_model_class = dinov2_model_class
+        self._input_coord_conv = False
+        self._pretrained = True
+
+        # DINOv2 preprocessing
+        self.preprocess = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+        self.nets.eval()
+
+    def forward(self, inputs):
+        x = self.preprocess(inputs)
+        x = self.nets(x)
+        if list(self.output_shape(list(inputs.shape)[1:])) != list(x.shape)[1:]:
+            raise ValueError('Size mismatch: expect size %s, but got size %s' % (
+                str(self.output_shape(list(inputs.shape)[1:])), str(list(x.shape)[1:]))
+            )
+        return x
+
+    def output_shape(self, input_shape):
+        """
+        Function to compute output shape from inputs to this module.
+        Args:
+            input_shape (iterable of int): shape of input. Does not include batch dimension.
+                Some modules may not need this argument, if their output does not depend
+                on the size of the input, or if they assume fixed size input.
+        Returns:
+            out_shape ([int]): list of integers corresponding to output shape
+        """
+        assert(len(input_shape) == 3)
+        if 'vits' in self._dinov2_model_class:
+            output_shape = [384]
+        elif 'vitb' in self._dinov2_model_class:
+            output_shape = [768]
+        elif 'vitl' in self._dinov2_model_class:
+            output_shape = [1024]
+        elif 'vitg' in self._dinov2_model_class:
+            output_shape = [1536]
+        return output_shape
+
+    def __repr__(self):
+        """Pretty print network."""
+        header = '{}'.format(str(self.__class__.__name__))
+        return header + '(input_channel={}, input_coord_conv={}, pretrained={}, freeze={})'.format(
+            self._input_channel, self._input_coord_conv, self._pretrained, self._freeze)
+
+
 class CoordConv2d(nn.Conv2d, Module):
     """
     2D Coordinate Convolution
