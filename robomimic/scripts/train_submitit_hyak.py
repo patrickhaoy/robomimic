@@ -19,7 +19,7 @@ class ExampleExecutorConfig(SubmititExecutorConfig):
 class ArgumentsConfig(BaseJobConfig):
     config: str = "dp_rgb"
 
-job_configs = [ArgumentsConfig(config=config) for config in ["mlp_rgb_r3m", "mlp_rgb_dinov2", "mlp_rgb_r3m_finetune"]] #"dp_rgb", "mlp_rgb", "mlp_rgb_cnn", 
+job_configs = [ArgumentsConfig(config=config) for config in ["mlp_rgb", "mlp_rgb_cnn", "mlp_rgb_r3m", "mlp_rgb_dinov2", "mlp_rgb_r3m_finetune", "dp_rgb"]]
 
 # # Since we do not need any checkpointing functionality, and the jobs will 
 # # not use the checkpoint path at all, we can use the base config.
@@ -40,7 +40,7 @@ def job_fn(job_cfg: ArgumentsConfig):
     sys.argv = [
         "script.py",  # dummy placeholder for program name
         "--config", f"robomimic/exps/templates/{job_cfg.config}.json",
-        "--name", f"{job_cfg.config}_v2",
+        "--name", f"{job_cfg.config}_v3",
         "--dataset", f"/tmp/datasets_{job_cfg.config}"
     ]
 
