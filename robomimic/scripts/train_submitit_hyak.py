@@ -11,7 +11,7 @@ class ExampleExecutorConfig(SubmititExecutorConfig):
     slurm_partition: str = "gpu-l40s"
     root_folder: str = "logging_dir"
     cpus_per_task: int = 16
-    mem_gb: int = 160
+    mem_gb: int = 200
     slurm_gpus_per_node: str = "1" # this is saying we want 1 gpu per node
     # slurm_constraint:str = "l40s" # This is saying we need a node with these gpus
 
