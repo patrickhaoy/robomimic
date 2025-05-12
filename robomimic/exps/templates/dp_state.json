@@ -46,7 +46,7 @@
         "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": "valid",
         "hdf5_load_next_obs": false,
-        "seq_length": 4,
+        "seq_length": 16,
         "pad_seq_length": true,
         "frame_stack": 2,
         "pad_frame_stack": true,
@@ -79,8 +79,8 @@
         },
         "horizon": {
             "observation_horizon": 2,
-            "action_horizon": 2,
-            "prediction_horizon": 4
+            "action_horizon": 8,
+            "prediction_horizon": 16
         },
         "unet": {
             "enabled": true,
