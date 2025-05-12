@@ -12,7 +12,7 @@
         "save": {
             "enabled": true,
             "every_n_seconds": null,
-            "every_n_epochs": 25,
+            "every_n_epochs": 250,
             "epochs": [],
             "on_best_validation": false,
             "on_best_rollout_return": false,
@@ -47,7 +47,7 @@
         "hdf5_validation_filter_key": "valid",
         "hdf5_load_next_obs": false,
         "seq_length": 4,
-        "pad_seq_length": true,
+        "pad_seq_length": false,
         "frame_stack": 2,
         "pad_frame_stack": true,
         "dataset_keys": [
