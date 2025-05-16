@@ -47,6 +47,9 @@
         "hdf5_validation_filter_key": "valid",
         "hdf5_load_next_obs": false,
         "seq_length": 1,
+        "pad_seq_length": true,
+        "frame_stack": 3,
+        "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
             "rewards",
@@ -166,12 +169,9 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "prev_actions",
                     "joint_pos",
-                    "joint_vel",
                     "end_effector_pose",
-                    "held_asset_pose",
-                    "time_left"
+                    "held_asset_pose"
                 ],
                 "rgb": [],
                 "depth": [],

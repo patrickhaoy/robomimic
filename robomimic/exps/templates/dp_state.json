@@ -48,7 +48,7 @@
         "hdf5_load_next_obs": false,
         "seq_length": 16,
         "pad_seq_length": true,
-        "frame_stack": 2,
+        "frame_stack": 3,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions"
@@ -78,8 +78,8 @@
             }
         },
         "horizon": {
-            "observation_horizon": 2,
-            "action_horizon": 8,
+            "observation_horizon": 3,
+            "action_horizon": 16,
             "prediction_horizon": 16
         },
         "unet": {
@@ -116,12 +116,9 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "prev_actions",
                     "joint_pos",
-                    "joint_vel",
                     "end_effector_pose",
-                    "held_asset_pose",
-                    "time_left"
+                    "held_asset_pose"
                 ],
                 "rgb": [],
                 "depth": [],

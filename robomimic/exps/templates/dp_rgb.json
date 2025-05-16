@@ -46,7 +46,7 @@
         "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": "valid",
         "hdf5_load_next_obs": false,
-        "seq_length": 16,
+        "seq_length": 4,
         "pad_seq_length": true,
         "frame_stack": 2,
         "pad_frame_stack": true,
@@ -55,7 +55,7 @@
         ],
         "goal_mode": null,
         "cuda": true,
-        "batch_size": 64,
+        "batch_size": 2,
         "num_epochs": 100000,
         "seed": 1,
         "action_config": {
@@ -79,8 +79,8 @@
         },
         "horizon": {
             "observation_horizon": 2,
-            "action_horizon": 8,
-            "prediction_horizon": 16
+            "action_horizon": 2,
+            "prediction_horizon": 4
         },
         "unet": {
             "enabled": true,

@@ -169,14 +169,12 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "last_arm_action",
-                    "arm_joint_pos"
+                    "arm_joint_pos",
+                    "front_rgb_r3m_features",
+                    "side_rgb_r3m_features",
+                    "wrist_rgb_r3m_features"
                 ],
-                "rgb": [
-                    "front_rgb",
-                    "side_rgb",
-                    "wrist_rgb"
-                ],
+                "rgb": [],
                 "depth": [],
                 "scan": []
             },
