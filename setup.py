@@ -16,6 +16,7 @@ setup(
         package for package in find_packages() if package.startswith("robomimic")
     ],
     install_requires=[
+        "gymnasium==0.29.1",
         "numpy",
         "huggingface-hub",
         "h5py",
