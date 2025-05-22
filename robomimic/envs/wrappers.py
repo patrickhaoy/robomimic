@@ -4,6 +4,7 @@ A collection of useful environment wrappers.
 from copy import deepcopy
 import textwrap
 import numpy as np
+import torch
 from collections import deque
 
 import robomimic.envs.env_base as EB
@@ -129,10 +130,17 @@ class FrameStackWrapper(EnvWrapper):
         """
         obs_history = {}
         for k in init_obs:
-            obs_history[k] = deque(
-                [init_obs[k][None] for _ in range(self.num_frames)], 
-                maxlen=self.num_frames,
-            )
+            # Handle both numpy arrays and torch tensors
+            if isinstance(init_obs[k], torch.Tensor):
+                obs_history[k] = deque(
+                    [init_obs[k].unsqueeze(0) for _ in range(self.num_frames)], 
+                    maxlen=self.num_frames,
+                )
+            else:
+                obs_history[k] = deque(
+                    [init_obs[k][None] for _ in range(self.num_frames)], 
+                    maxlen=self.num_frames,
+                )
         return obs_history
 
     def _get_stacked_obs_from_history(self):
@@ -141,8 +149,15 @@ class FrameStackWrapper(EnvWrapper):
         stacked observation where each key is a numpy array with leading dimension
         @self.num_frames.
         """
-        # concatenate all frames per key so we return a numpy array per key
-        return { k : np.concatenate(self.obs_history[k], axis=0) for k in self.obs_history }
+        # concatenate all frames per key so we return a numpy array or torch tensor 
+        # per key
+        stacked_obs = {}
+        for k in self.obs_history:
+            if isinstance(self.obs_history[k][0], torch.Tensor):
+                stacked_obs[k] = torch.cat(list(self.obs_history[k]), dim=0).transpose(0, 1)
+            else:
+                stacked_obs[k] = np.concatenate(list(self.obs_history[k]), axis=0).transpose(0, 1)
+        return stacked_obs
 
     def cache_obs_history(self):
         self.obs_history_cache = deepcopy(self.obs_history)
@@ -203,19 +218,36 @@ class FrameStackWrapper(EnvWrapper):
         self.update_obs(obs, action=action, reset=False)
         # update frame history
         for k in obs:
-            # make sure to have leading dim of 1 for easy concatenation
-            self.obs_history[k].append(obs[k][None])
+            # Handle both numpy arrays and torch tensors
+            if isinstance(obs[k], torch.Tensor):
+                self.obs_history[k].append(obs[k].unsqueeze(0))
+            else:
+                self.obs_history[k].append(obs[k][None])
         obs_ret = self._get_stacked_obs_from_history()
         return obs_ret, r, done, info
 
     def update_obs(self, obs, action=None, reset=False):
-        obs["timesteps"] = np.array([self.timestep])
-        
+        # Get dtype and device of obs
+        sample_obs = next(iter(obs.values()))
+
+        # Handle timesteps
+        if isinstance(sample_obs, torch.Tensor):
+            obs["timesteps"] = torch.tensor([self.timestep], device=sample_obs.device)
+        else:
+            obs["timesteps"] = np.array([self.timestep])
+
+        # Handle actions
         if reset:
-            obs["actions"] = np.zeros(self.env.action_dimension)
+            if isinstance(sample_obs, torch.Tensor):
+                obs["actions"] = torch.zeros(1, self.env.num_envs, self.env.action_dimension, device=sample_obs.device)
+            else:
+                obs["actions"] = np.zeros(1, self.env.num_envs, self.env.action_dimension)
         else:
             self.timestep += 1
-            obs["actions"] = action[: self.env.action_dimension]
+            if isinstance(sample_obs, torch.Tensor):
+                obs["actions"] = action[..., : self.env.action_dimension][None, ...]
+            else:
+                obs["actions"] = action[..., : self.env.action_dimension][None, ...]
 
     def _to_string(self):
         """Info to pretty print."""

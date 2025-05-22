@@ -6,6 +6,7 @@ from collections import OrderedDict
 import functools
 
 import numpy as np
+import torch
 
 
 def action_dict_to_vector(
@@ -15,7 +16,10 @@ def action_dict_to_vector(
         action_keys = list(action_dict.keys())
     actions = [action_dict[k] for k in action_keys]
 
-    action_vec = np.concatenate(actions, axis=-1)
+    if type(actions[0]) == np.ndarray:
+        action_vec = np.concatenate(actions, axis=-1)
+    else:
+        action_vec = torch.cat(actions, dim=-1)
     return action_vec
 
 

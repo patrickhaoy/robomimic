@@ -5,13 +5,12 @@ from typing import Callable, Union
 import math
 from collections import OrderedDict, deque
 from packaging.version import parse as parse_version
+import copy
 import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# requires diffusers==0.11.1
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.schedulers import DDPMScheduler, DDIMScheduler
 from diffusers.training_utils import EMAModel
 
 import robomimic.models.obs_nets as ObsNets
@@ -107,10 +106,12 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # setup EMA
         ema = None
         if self.algo_config.ema.enabled:
-            ema = EMAModel(model=nets, power=self.algo_config.ema.power)
+            ema = EMAModel(parameters=nets.parameters(), power=self.algo_config.ema.power)
                 
         # set attrs
         self.nets = nets
+        self._shadow_nets = copy.deepcopy(self.nets).eval()
+        self._shadow_nets.requires_grad_(False)
         self.noise_scheduler = noise_scheduler
         self.ema = ema
         self.action_check_done = False
@@ -255,17 +256,19 @@ class DiffusionPolicyUNet(PolicyAlgo):
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
     
-    def reset(self):
+    def reset(self, resets):
         """
         Reset algo state to prepare for environment rollouts.
         """
         # setup inference queues
+        assert resets is not None
         To = self.algo_config.horizon.observation_horizon
         Ta = self.algo_config.horizon.action_horizon
-        obs_queue = deque(maxlen=To)
-        action_queue = deque(maxlen=Ta)
-        self.obs_queue = obs_queue
-        self.action_queue = action_queue
+        self.num_envs = resets.shape[0]
+        if self.action_queue is None:
+            self.action_queue = [deque(maxlen=Ta) for _ in range(self.num_envs)]
+        elif resets.sum() > 0:
+            self.action_queue = [deque(maxlen=Ta) if resets[i] else self.action_queue[i] for i in range(self.num_envs)]
     
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -288,27 +291,35 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # if already full, append one to the obs_queue
         # n_repeats = max(To - len(self.obs_queue), 1)
         # self.obs_queue.extend([obs_dict] * n_repeats)
-        
-        if len(self.action_queue) == 0:
-            # no actions left, run inference
-            # turn obs_queue into dict of tensors (concat at T dim)
-            # import pdb; pdb.set_trace()
-            # obs_dict_list = TensorUtils.list_of_flat_dict_to_dict_of_list(list(self.obs_queue))
-            # obs_dict_tensor = dict((k, torch.cat(v, dim=0).unsqueeze(0)) for k,v in obs_dict_list.items())
+        # if self.num_envs > 1:
+        reset_envs = [len(aq) == 0 for aq in self.action_queue]
+        # [len(aq) for aq in self.action_queue]
+        if reset_envs.count(True) > 0:
+            new_action_sequences = self._get_action_trajectory(obs_dict=obs_dict)
+            for i in range(self.num_envs):
+                if reset_envs[i]:
+                    self.action_queue[i].extend(new_action_sequences[i])
+        action = torch.stack([self.action_queue[i].popleft() for i in range(self.num_envs)], dim=0)
+        # if len(self.action_queue) == 0:
+        #     # no actions left, run inference
+        #     # turn obs_queue into dict of tensors (concat at T dim)
+        #     # import pdb; pdb.set_trace()
+        #     # obs_dict_list = TensorUtils.list_of_flat_dict_to_dict_of_list(list(self.obs_queue))
+        #     # obs_dict_tensor = dict((k, torch.cat(v, dim=0).unsqueeze(0)) for k,v in obs_dict_list.items())
             
-            # run inference
-            # [1,T,Da]
-            action_sequence = self._get_action_trajectory(obs_dict=obs_dict)
+        #     # run inference
+        #     # [1,T,Da]
+        #     action_sequence = self._get_action_trajectory(obs_dict=obs_dict)
             
-            # put actions into the queue
-            self.action_queue.extend(action_sequence[0])
+        #     # put actions into the queue
+        #     self.action_queue.extend(action_sequence[0])
         
-        # has action, execute from left to right
-        # [Da]
-        action = self.action_queue.popleft()
+        # # has action, execute from left to right
+        # # [Da]
+        # action = self.action_queue.popleft()
         
-        # [1,Da]
-        action = action.unsqueeze(0)
+        # # [1,Da]
+        # action = action.unsqueeze(0)
         return action
         
     def _get_action_trajectory(self, obs_dict, goal_dict=None):
@@ -327,7 +338,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
         # select network
         nets = self.nets
         if self.ema is not None:
-            nets = self.ema.averaged_model
+            self.ema.copy_to(parameters=self._shadow_nets.parameters())
+            nets = self._shadow_nets
         
         # encode obs
         inputs = {
@@ -336,7 +348,8 @@ class DiffusionPolicyUNet(PolicyAlgo):
         }
         for k in self.obs_shapes:
             # first two dimensions should be [B, T] for inputs
-            assert inputs['obs'][k].ndim - 2 == len(self.obs_shapes[k])
+            if inputs['obs'][k].ndim - 2 != len(self.obs_shapes[k]):
+                inputs['obs'][k] = inputs['obs'][k].unsqueeze(1)
         obs_features = TensorUtils.time_distributed(inputs, self.nets['policy']['obs_encoder'], inputs_as_kwargs=True)
         assert obs_features.ndim == 3  # [B, T, D]
         B = obs_features.shape[0]
@@ -350,12 +363,15 @@ class DiffusionPolicyUNet(PolicyAlgo):
         naction = noisy_action
         
         # init scheduler
-        self.noise_scheduler.set_timesteps(num_inference_timesteps)
+        self.noise_scheduler.set_timesteps(
+            num_inference_timesteps,
+            device=self.device
+        )
 
         for k in self.noise_scheduler.timesteps:
             # predict noise
             noise_pred = nets['policy']['noise_pred_net'](
-                sample=naction, 
+                sample=naction,
                 timestep=k,
                 global_cond=obs_cond
             )
@@ -379,7 +395,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         """
         return {
             "nets": self.nets.state_dict(),
-            "ema": self.ema.averaged_model.state_dict() if self.ema is not None else None,
+            "ema": self.ema.state_dict() if self.ema is not None else None,
         }
 
     def deserialize(self, model_dict):
@@ -392,7 +408,7 @@ class DiffusionPolicyUNet(PolicyAlgo):
         """
         self.nets.load_state_dict(model_dict["nets"])
         if model_dict.get("ema", None) is not None:
-            self.ema.averaged_model.load_state_dict(model_dict["ema"])
+            self.ema.load_state_dict(model_dict["ema"])
 
     
             

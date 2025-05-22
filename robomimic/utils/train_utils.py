@@ -109,7 +109,6 @@ def load_data_for_training(config, obs_keys, lang_encoder=None):
 
     # load the dataset into memory
     if config.experiment.validate:
-        assert not config.train.hdf5_normalize_obs, "no support for observation normalization with validation data yet"
         assert (train_filter_by_attribute is not None) and (valid_filter_by_attribute is not None), \
             "did not specify filter keys corresponding to train and valid split in dataset" \
             " - please fill config.train.hdf5_filter_key and config.train.hdf5_validation_filter_key"
@@ -133,6 +132,7 @@ def load_data_for_training(config, obs_keys, lang_encoder=None):
             filter_by_attribute=valid_filter_by_attribute,
             lang_encoder=lang_encoder,
         )
+        valid_dataset.set_action_normalization_stats(train_dataset.get_action_normalization_stats())
     else:
         train_dataset = dataset_factory(
             config, obs_keys,
@@ -167,7 +167,7 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         dataset_path = config.train.data
 
     ds_kwargs = dict(
-        hdf5_path=dataset_path,
+        # hdf5_path=dataset_path,
         obs_keys=obs_keys,
         action_keys=config.train.action_keys,
         dataset_keys=config.train.dataset_keys,
@@ -177,20 +177,26 @@ def dataset_factory(config, obs_keys, filter_by_attribute=None, dataset_path=Non
         seq_length=config.train.seq_length,
         pad_frame_stack=config.train.pad_frame_stack,
         pad_seq_length=config.train.pad_seq_length,
-        get_pad_mask=True,
+        get_pad_mask=False,
         goal_mode=config.train.goal_mode,
         hdf5_cache_mode=config.train.hdf5_cache_mode,
         hdf5_use_swmr=config.train.hdf5_use_swmr,
         hdf5_normalize_obs=config.train.hdf5_normalize_obs,
-        filter_by_attribute=filter_by_attribute,
+        # filter_by_attribute=filter_by_attribute,
         shuffled_obs_key_groups=config.train.shuffled_obs_key_groups,
         lang_encoder=lang_encoder,
     )
 
-    ds_kwargs["hdf5_path"] = [ds_cfg["path"] for ds_cfg in config.train.data]
-    ds_kwargs["filter_by_attribute"] = [ds_cfg.get("filter_key", filter_by_attribute) for ds_cfg in config.train.data]
-    ds_weights = [ds_cfg.get("weight", 1.0) for ds_cfg in config.train.data]
-    ds_langs = [ds_cfg.get("lang", None) for ds_cfg in config.train.data]
+    if isinstance(dataset_path, str):
+        ds_kwargs["hdf5_path"] = [dataset_path]
+        ds_kwargs["filter_by_attribute"] = [filter_by_attribute]
+        ds_weights = [1.0]
+        ds_langs = [None]
+    else:
+        ds_kwargs["hdf5_path"] = [ds_cfg["path"] for ds_cfg in config.train.data]
+        ds_kwargs["filter_by_attribute"] = [ds_cfg.get("filter_key", filter_by_attribute) for ds_cfg in config.train.data]
+        ds_weights = [ds_cfg.get("weight", 1.0) for ds_cfg in config.train.data]
+        ds_langs = [ds_cfg.get("lang", None) for ds_cfg in config.train.data]
 
     meta_ds_kwargs = dict()
 

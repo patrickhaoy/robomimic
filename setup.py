@@ -16,7 +16,8 @@ setup(
         package for package in find_packages() if package.startswith("robomimic")
     ],
     install_requires=[
-        "numpy==1.23.2",
+        "numpy",
+        "huggingface-hub",
         "h5py",
         "psutil",
         "tqdm",
@@ -26,12 +27,13 @@ setup(
         "imageio",
         "imageio-ffmpeg",
         "matplotlib",
-        #"egl_probe>=1.0.1",
-        "torch==2.0.1",
-        "torchvision==0.15.2",
-        "diffusers==0.11.1",
-        "tianshou==0.4.10",
+        "egl_probe",
+        "torch==2.5.1",
+        "torchvision",
+        "diffusers",
+        "tianshou",
         "transformers",
+        "wandb"
     ],
     eager_resources=['*'],
     include_package_data=True,

@@ -147,7 +147,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         # maybe prepare for observation normalization
         self.obs_normalization_stats = None
         if self.hdf5_normalize_obs:
-            self.obs_normalization_stats = self.normalize_obs()
+            obs_stats, _ = load_normalization_stats(hdf5_path)
+            if obs_stats is not None:
+                print("SequenceDataset: using observation normalization stats from file...")
+                self.obs_normalization_stats = {k: obs_stats[k] for k in self.obs_keys if k in obs_stats}
+            else:
+                self.obs_normalization_stats = self.normalize_obs()
 
         # prepare for action normalization
         self.action_normalization_stats = None
@@ -390,8 +395,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         obs_normalization_stats = { k : {} for k in merged_stats }
         for k in merged_stats:
             # note we add a small tolerance of 1e-3 for std
-            obs_normalization_stats[k]["mean"] = merged_stats[k]["mean"]
-            obs_normalization_stats[k]["std"] = np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3
+            obs_normalization_stats[k]["mean"] = merged_stats[k]["mean"].astype(np.float32)
+            obs_normalization_stats[k]["std"] = (np.sqrt(merged_stats[k]["sqdiff"] / merged_stats[k]["n"]) + 1e-3).astype(np.float32)
         return obs_normalization_stats
 
     def get_obs_normalization_stats(self):
@@ -1068,6 +1073,7 @@ class MetaDataset(torch.utils.data.Dataset):
         normalize_weights_by_ds_size=False,
     ):
         super(MetaDataset, self).__init__()
+        assert len(datasets) > 0, "MetaDataset requires at least one dataset"
         self.datasets = datasets
         ds_lens = np.array([len(ds) for ds in self.datasets])
         if normalize_weights_by_ds_size:
@@ -1078,8 +1084,15 @@ class MetaDataset(torch.utils.data.Dataset):
 
         # cache mode "all" not supported! The action normalization stats of each
         # dataset will change after the datasets are already initialized
+
+        hdf5_normalize_obs = True
         for ds in self.datasets:
             assert ds.hdf5_cache_mode != "all"
+            hdf5_normalize_obs = hdf5_normalize_obs and ds.hdf5_normalize_obs
+
+        self.obs_normalization_stats = None
+        if hdf5_normalize_obs:
+            self.obs_normalization_stats = self.get_obs_normalization_stats()
 
         # TODO: comment
         action_stats = self.get_action_stats()
@@ -1157,17 +1170,86 @@ class MetaDataset(torch.utils.data.Dataset):
                 action_stats, self.datasets[0].action_config)
         return self.action_normalization_stats
 
+    def get_obs_normalization_stats(self):
+        if self.obs_normalization_stats is None:
+            # Get dataset sizes for weighting
+            ds_lens = np.array([len(ds) for ds in self.datasets])
+            total_size = sum(ds_lens)
+            weights = [size / total_size for size in ds_lens]
+
+            # Get observation stats from each dataset
+            all_obs_stats = []
+            for ds in self.datasets:
+                if ds.hdf5_normalize_obs:
+                    stats = ds.get_obs_normalization_stats()
+                    if stats is not None:
+                        all_obs_stats.append(stats)
+                else:
+                    raise ValueError("Dataset {} is not using observation normalization!".format(ds))
+
+            # Initialize combined stats
+            obs_normalization_stats = {}
+            for key in all_obs_stats[0].keys():
+                # Weight and combine stats from all datasets
+                weighted_means = np.zeros_like(all_obs_stats[0][key]["mean"])
+                weighted_stds = np.zeros_like(all_obs_stats[0][key]["std"])
+                for i, stats in enumerate(all_obs_stats):
+                    weighted_means += stats[key]["mean"] * weights[i]
+                    weighted_stds += stats[key]["std"] * weights[i]
+                obs_normalization_stats[key] = {
+                    "mean": weighted_means,
+                    "std": weighted_stds
+                }
+
+            self.obs_normalization_stats = obs_normalization_stats
+
+        return deepcopy(self.obs_normalization_stats)
+
+
+def _is_image_obs(obs):
+    """
+    Helper function to identify if an observation is an image.
+    An image observation has 3 or more dimensions (height, width, channels).
+    """
+    return len(obs.shape) >= 3
+
+
 def _compute_traj_stats(traj_obs_dict):
     """
     Helper function to compute statistics over a single trajectory of observations.
+    For image observations, computes channel-wise statistics.
+    For non-image observations, computes pixel-wise statistics.
     """
-    traj_stats = { k : {} for k in traj_obs_dict }
+    traj_stats = {k: {} for k in traj_obs_dict}
     for k in traj_obs_dict:
-        traj_stats[k]["n"] = traj_obs_dict[k].shape[0]
-        traj_stats[k]["mean"] = traj_obs_dict[k].mean(axis=0, keepdims=True) # [1, ...]
-        traj_stats[k]["sqdiff"] = ((traj_obs_dict[k] - traj_stats[k]["mean"]) ** 2).sum(axis=0, keepdims=True) # [1, ...]
-        traj_stats[k]["min"] = traj_obs_dict[k].min(axis=0, keepdims=True)
-        traj_stats[k]["max"] = traj_obs_dict[k].max(axis=0, keepdims=True)
+        obs = traj_obs_dict[k]
+        traj_stats[k]["n"] = obs.shape[0]
+
+        if _is_image_obs(obs):
+            # obs: (N, C, H, W)
+            # 1) collapse spatial dims → (N, C)
+            spatial = obs.mean(axis=(2, 3))  
+
+            # 2) compute channel-wise summaries over frames → (C,)
+            mean_c = spatial.mean(axis=0)                      # E_over_frames[ E_over_pixels[obs] ]
+            sqdiff_c = ((spatial - mean_c)**2).sum(axis=0)       # sum of squared devs over frames
+            min_c = spatial.min(axis=0)
+            max_c = spatial.max(axis=0)
+
+            # 3) broadcast each (C,) vector to (1, H, W, C)
+            _, C, H, W = obs.shape
+            # reshape to (1,1,1,C) then tile over (H, W)
+            traj_stats[k]["mean"] = np.tile(mean_c.reshape(1, C, 1, 1), (1, 1, H, W))
+            traj_stats[k]["sqdiff"] = np.tile(sqdiff_c.reshape(1, C, 1, 1), (1, 1, H, W))
+            traj_stats[k]["min"] = np.tile(min_c.reshape(1, C, 1, 1), (1, 1, H, W))
+            traj_stats[k]["max"] = np.tile(max_c.reshape(1, C, 1, 1), (1, 1, H, W))
+        else:
+            # non-image obs: obs could be (N, D) or (N, ..., ...)
+            traj_stats[k]["mean"] = obs.mean(axis=0, keepdims=True)  
+            traj_stats[k]["sqdiff"] = ((obs - traj_stats[k]["mean"])**2).sum(axis=0, keepdims=True)
+            traj_stats[k]["min"] = obs.min(axis=0, keepdims=True)
+            traj_stats[k]["max"] = obs.max(axis=0, keepdims=True)
+
     return traj_stats
 
 def _aggregate_traj_stats(traj_stats_a, traj_stats_b):
@@ -1252,5 +1334,46 @@ def action_stats_to_normalization_stats(action_stats, action_config):
         else:
             raise NotImplementedError(
                 'action_config.actions.normalization: "{}" is not supported'.format(norm_method))
-    
+
     return action_normalization_stats
+
+
+def load_normalization_stats(dataset_path):
+    """
+    Load normalization stats from HDF5 file if they exist.
+
+    Args:
+        dataset_path (str): path to HDF5 dataset
+
+    Returns:
+        tuple: (obs_normalization_stats, action_normalization_stats) or (None, None) if not found
+    """
+    try:
+        with h5py.File(dataset_path, 'r') as f:
+            if 'normalization_stats' not in f:
+                return None, None
+
+            stats = f['normalization_stats']
+            obs_stats = None
+            action_stats = None
+
+            if 'obs' in stats:
+                obs_stats = {}
+                for obs_key in stats['obs']:
+                    obs_stats[obs_key] = {
+                        'mean': stats['obs'][obs_key]['mean'][:],
+                        'std': stats['obs'][obs_key]['std'][:]
+                    }
+
+            if 'actions' in stats:
+                action_stats = OrderedDict()
+                for action_key in stats['actions']:
+                    action_stats[action_key] = {
+                        'scale': stats['actions'][action_key]['scale'][:],
+                        'offset': stats['actions'][action_key]['offset'][:]
+                    }
+
+            return obs_stats, action_stats
+    except Exception as e:
+        print(f"Warning: Could not load normalization stats from {dataset_path}: {e}")
+        return None, None

@@ -298,8 +298,14 @@ def wrap_env_from_config(env, config):
     Wraps environment using the provided Config object to determine which wrappers
     to use (if any).
     """
-    if config.train.frame_stack > 1:
+    # Get frame_stack value, handling both attribute and dict-style access
+    if hasattr(config, 'train'):
+        frame_stack = config.train.frame_stack
+    else:
+        frame_stack = config['train']['frame_stack']
+
+    if frame_stack > 1:
         from robomimic.envs.wrappers import FrameStackWrapper
-        env = FrameStackWrapper(env, num_frames=config.train.frame_stack)
+        env = FrameStackWrapper(env, num_frames=frame_stack)
 
     return env
