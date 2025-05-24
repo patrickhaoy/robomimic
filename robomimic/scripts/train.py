@@ -414,9 +414,8 @@ def main(args):
     print(res_str)
 
 
-if __name__ == "__main__":
+def get_parser():
     parser = argparse.ArgumentParser()
-
     # External config file that overwrites default config
     parser.add_argument(
         "--config",
@@ -463,5 +462,10 @@ if __name__ == "__main__":
         help="disables training and only runs policy evaluation. config must include ckpt_path"
     )
 
+    return parser
+
+
+if __name__ == "__main__":
+    parser = get_parser()
     args = parser.parse_args()
     main(args)
