@@ -19,7 +19,7 @@
             "on_best_rollout_success_rate": true
         },
         "epoch_every_n_steps": 100,
-        "validation_epoch_every_n_steps": 10,
+        "validation_epoch_every_n_steps": 10
     },
     "train": {
         "data": null,
