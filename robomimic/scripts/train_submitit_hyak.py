@@ -8,10 +8,10 @@ from submitit_tools.configs import SubmititExecutorConfig, BaseJobConfig, WandbC
 @dataclass
 class ExampleExecutorConfig(SubmititExecutorConfig):
     timeout_min: int = 48 * 60
-    slurm_partition: str = "gpu-l40s"
+    slurm_partition: str = "gpu-a40"
     root_folder: str = "logging_dir"
-    cpus_per_task: int = 16
-    mem_gb: int = 275
+    cpus_per_task: int = 6
+    mem_gb: int = 120
     slurm_gpus_per_node: str = "1" # this is saying we want 1 gpu per node
     # slurm_constraint:str = "l40s" # This is saying we need a node with these gpus
 

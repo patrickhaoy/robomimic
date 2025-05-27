@@ -156,7 +156,7 @@
                     "arm_joint_pos",
                     "front_rgb_dinov2_features",
                     "side_rgb_dinov2_features",
-                    "wrist_rgb_dinov2_r3m_features"
+                    "wrist_rgb_dinov2_features"
                 ],
                 "rgb": [],
                 "depth": [],
