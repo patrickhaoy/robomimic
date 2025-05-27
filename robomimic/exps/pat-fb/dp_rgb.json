@@ -102,11 +102,14 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "arm_joint_pos",
-                    "end_effector_pose",
-                    "held_asset_pose"
+                    "last_arm_action",
+                    "arm_joint_pos"
                 ],
-                "rgb": [],
+                "rgb": [
+                    "front_rgb",
+                    "side_rgb",
+                    "wrist_rgb"
+                ],
                 "depth": [],
                 "scan": []
             },

@@ -1,14 +1,15 @@
 {
-    "algo_name": "bc",
+    "algo_name": "diffusion_policy",
     "experiment": {
-        "name": "mlp_rgb_nohistory",
+        "name": "dp_rgb_r3m",
         "validate": true,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
             "log_wandb": true,
-            "wandb_proj_name": "pat-fb-mlp"
+            "wandb_proj_name": "pat-fb-ddpm"
         },
+        "mse":{},
         "save": {
             "enabled": true,
             "every_n_seconds": null,
@@ -23,7 +24,7 @@
     },
     "train": {
         "data": null,
-        "output_dir":"../mlp_policy_trained_models",
+        "output_dir":"../diffusion_policy_trained_models",
         "num_data_workers": 8,
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
@@ -31,9 +32,9 @@
         "hdf5_normalize_obs": true,
         "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": "valid",
-        "seq_length": 1,
+        "seq_length": 15,
         "pad_seq_length": true,
-        "frame_stack": 1,
+        "frame_stack": 2,
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions"
@@ -62,103 +63,52 @@
                 }
             }
         },
-        "loss": {
-            "l2_weight": 1.0,
-            "l1_weight": 0.0,
-            "cos_weight": 0.0
+        "horizon": {
+            "observation_horizon": 2,
+            "action_horizon": 8,
+            "prediction_horizon": 16
         },
-        "actor_layer_dims": [
-            256,
-            128,
-            64
-        ],
-        "gaussian": {
+        "unet": {
             "enabled": true,
-            "fixed_std": false,
-            "init_std": 0.1,
-            "min_std": 0.01,
-            "std_activation": "softplus",
-            "low_noise_eval": false
+            "diffusion_step_embed_dim": 256,
+            "down_dims": [256,512,1024],
+            "kernel_size": 5,
+            "n_groups": 8
         },
-        "gmm": {
-            "enabled": false,
-            "num_modes": 5,
-            "min_std": 0.0001,
-            "std_activation": "softplus",
-            "low_noise_eval": false
+        "ema": {
+            "enabled": true,
+            "power": 0.75
         },
-        "vae": {
-            "enabled": false,
-            "latent_dim": 14,
-            "latent_clip": null,
-            "kl_weight": 1.0,
-            "decoder": {
-                "is_conditioned": true,
-                "reconstruction_sum_across_elements": false
-            },
-            "prior": {
-                "learn": false,
-                "is_conditioned": false,
-                "use_gmm": false,
-                "gmm_num_modes": 10,
-                "gmm_learn_weights": false,
-                "use_categorical": false,
-                "categorical_dim": 10,
-                "categorical_gumbel_softmax_hard": false,
-                "categorical_init_temp": 1.0,
-                "categorical_temp_anneal_step": 0.001,
-                "categorical_min_temp": 0.3
-            },
-            "encoder_layer_dims": [
-                300,
-                400
-            ],
-            "decoder_layer_dims": [
-                300,
-                400
-            ],
-            "prior_layer_dims": [
-                300,
-                400
-            ]
+        "ddpm": {
+            "enabled": true,
+            "num_train_timesteps": 100,
+            "num_inference_timesteps": 100,
+            "beta_schedule": "squaredcos_cap_v2",
+            "clip_sample": true,
+            "prediction_type": "epsilon"
         },
-        "rnn": {
+        "ddim": {
             "enabled": false,
-            "horizon": 10,
-            "hidden_dim": 400,
-            "rnn_type": "LSTM",
-            "num_layers": 2,
-            "open_loop": false,
-            "kwargs": {
-                "bidirectional": false
-            }
-        },
-        "transformer": {
-            "enabled": false,
-            "context_length": 10,
-            "embed_dim": 512,
-            "num_layers": 6,
-            "num_heads": 8,
-            "emb_dropout": 0.1,
-            "attn_dropout": 0.1,
-            "block_output_dropout": 0.1,
-            "sinusoidal_embedding": false,
-            "activation": "gelu",
-            "supervise_all_steps": false,
-            "nn_parameter_for_timesteps": true
+            "num_train_timesteps": 100,
+            "num_inference_timesteps": 10,
+            "beta_schedule": "squaredcos_cap_v2",
+            "clip_sample": true,
+            "set_alpha_to_one": true,
+            "steps_offset": 0,
+            "prediction_type": "epsilon"
         }
     },
     "observation": {
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "arm_joint_pos"
+                    "last_arm_action",
+                    "arm_joint_pos",
+                    "front_rgb_r3m_features",
+                    "side_rgb_r3m_features",
+                    "wrist_rgb_r3m_features"
                 ],
-                "rgb": [
-                    "front_rgb",
-                    "side_rgb",
-                    "wrist_rgb"
-                ],
+                "rgb": [],
                 "depth": [],
                 "scan": []
             },
@@ -179,7 +129,7 @@
             "rgb": {
                 "core_class": "VisualCore",
                 "core_kwargs": {
-                    "feature_dimension": 128,
+                    "feature_dimension": 64,
                     "backbone_class": "ResNet18Conv",
                     "backbone_kwargs": {
                         "pretrained": false,
@@ -193,8 +143,13 @@
                         "noise_std": 0.0
                     }
                 },
-                "obs_randomizer_class": null,
-                "obs_randomizer_kwargs": {}
+                "obs_randomizer_class": "CropRandomizer",
+                "obs_randomizer_kwargs": {
+                    "crop_height": 76,
+                    "crop_width": 76,
+                    "num_crops": 1,
+                    "pos_enc": false
+                }
             },
             "depth": {
                 "core_class": "VisualCore",

@@ -64,6 +64,12 @@ def train(config, device, eval_only=False):
     Train a model using the algorithm.
     """
 
+    # Check action normalization requirements
+    assert config.train.action_config["actions"]["normalization"] == "min_max", "Actions must be normalized to [-1, 1] for tanh output"
+    # Check frame stacking requirements
+    if config.algo_name == "bc":
+        assert config.train.frame_stack == 1, "BC does not support frame stacking"
+
     # first set seeds
     np.random.seed(config.train.seed)
     torch.manual_seed(config.train.seed)
@@ -397,7 +403,7 @@ def main(args):
         config.experiment.epoch_every_n_steps = 3
         config.experiment.validation_epoch_every_n_steps = 3
         config.train.num_epochs = 2
-        config.train.batch_size = 2
+        config.train.batch_size = 4
 
         # send output to a temporary directory
         config.train.output_dir = "/tmp/tmp_trained_models"
