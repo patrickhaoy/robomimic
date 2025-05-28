@@ -24,7 +24,7 @@
     "train": {
         "data": null,
         "output_dir":"../mlp_policy_trained_models",
-        "num_data_workers": 8,
+        "num_data_workers": 12,
         "hdf5_cache_mode": "low_dim",
         "hdf5_use_swmr": true,
         "hdf5_load_next_obs": false,
