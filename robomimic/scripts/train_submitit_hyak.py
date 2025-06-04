@@ -7,10 +7,10 @@ from submitit_tools.configs import SubmititExecutorConfig, BaseJobConfig, WandbC
 #  This is the "TopLevel" Executor Config that submitit uses to execute all jobs.
 @dataclass
 class ExampleExecutorConfig(SubmititExecutorConfig):
-    timeout_min: int = 48 * 60
+    timeout_min: int = 96 * 60
     slurm_partition: str = "gpu-l40"
     root_folder: str = "logging_dir"
-    cpus_per_task: int = 12
+    cpus_per_task: int = 16
     mem_gb: int = 180
     slurm_gpus_per_node: str = "1" # this is saying we want 1 gpu per node
     # slurm_constraint:str = "l40s" # This is saying we need a node with these gpus
@@ -19,7 +19,7 @@ class ExampleExecutorConfig(SubmititExecutorConfig):
 class ArgumentsConfig(BaseJobConfig):
     config: str = "dp_rgb"
 
-job_configs = [ArgumentsConfig(config=config) for config in ["dp_state", "dp_rgb", "mlp_rgb_r3m", "mlp_rgb_dinov2", "dp_rgb_r3m", "dp_rgb_dinov2"]]
+job_configs = [ArgumentsConfig(config=config) for config in ["dp_rgb", "mlp_rgb","mlp_rgb_r3m", "mlp_rgb_dinov2", "dp_rgb_r3m", "dp_rgb_dinov2"]]
 
 # # Since we do not need any checkpointing functionality, and the jobs will 
 # # not use the checkpoint path at all, we can use the base config.
@@ -62,7 +62,7 @@ state = SubmititState(
     executor_config=ExampleExecutorConfig(),
     job_run_configs=job_configs,
     job_wandb_configs=wandb_configs,
-    max_retries=10,
+    max_retries=0,
 )
 
 # 5. Wait and then get the results of the submission
