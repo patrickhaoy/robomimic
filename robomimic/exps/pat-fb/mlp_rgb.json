@@ -156,7 +156,6 @@
                 ],
                 "rgb": [
                     "front_rgb",
-                    "side_rgb",
                     "wrist_rgb"
                 ],
                 "depth": [],

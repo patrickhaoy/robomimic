@@ -7,7 +7,7 @@ from submitit_tools.configs import SubmititExecutorConfig, BaseJobConfig, WandbC
 #  This is the "TopLevel" Executor Config that submitit uses to execute all jobs.
 @dataclass
 class ExampleExecutorConfig(SubmititExecutorConfig):
-    timeout_min: int = 96 * 60
+    timeout_min: int = 88 * 60
     slurm_partition: str = "gpu-l40"
     root_folder: str = "logging_dir"
     cpus_per_task: int = 16
@@ -19,7 +19,7 @@ class ExampleExecutorConfig(SubmititExecutorConfig):
 class ArgumentsConfig(BaseJobConfig):
     config: str = "dp_rgb"
 
-job_configs = [ArgumentsConfig(config=config) for config in ["dp_rgb", "mlp_rgb","mlp_rgb_r3m", "mlp_rgb_dinov2", "dp_rgb_r3m", "dp_rgb_dinov2"]]
+job_configs = [ArgumentsConfig(config=config) for config in ["dp_rgb", "mlp_rgb"]]
 
 # # Since we do not need any checkpointing functionality, and the jobs will 
 # # not use the checkpoint path at all, we can use the base config.
@@ -40,7 +40,7 @@ def job_fn(job_cfg: ArgumentsConfig):
     sys.argv = [
         "script.py",  # dummy placeholder for program name
         "--config", f"robomimic/exps/pat-fb/{job_cfg.config}.json",
-        "--name", f"{job_cfg.config}_v0",
+        "--name", f"{job_cfg.config}_nosidergb",
         "--dataset", f"/tmp/datasets_{job_cfg.config}"
     ]
 
