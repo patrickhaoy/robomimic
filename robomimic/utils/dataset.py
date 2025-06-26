@@ -459,7 +459,8 @@ class SequenceDataset(torch.utils.data.Dataset):
             # if key is an observation, it may not be in memory
             if '/' in key:
                 key1, key2 = key.split('/')
-                assert(key1 in ['obs', 'next_obs', 'action_dict'])
+                valid_parent_keys = ['obs', 'next_obs', 'action_dict', 'actions', 'actions_dist']
+                assert(key1 in valid_parent_keys)
                 if key2 not in self.obs_keys_in_memory:
                     key_should_be_in_memory = False
 
@@ -467,7 +468,8 @@ class SequenceDataset(torch.utils.data.Dataset):
             # read cache
             if '/' in key:
                 key1, key2 = key.split('/')
-                assert(key1 in ['obs', 'next_obs', 'action_dict'])
+                valid_parent_keys = ['obs', 'next_obs', 'action_dict', 'actions', 'actions_dist']
+                assert(key1 in valid_parent_keys)
                 ret = self.hdf5_cache[ep][key1][key2]
             else:
                 ret = self.hdf5_cache[ep][key]

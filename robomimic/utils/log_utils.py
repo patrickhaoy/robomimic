@@ -38,6 +38,11 @@ class PrintLogger(object):
         # you might want to specify some extra behavior here.
         pass
 
+    def isatty(self):
+        # Return False since this is not a real terminal
+        # This is needed for wandb compatibility
+        return False
+
 
 class DataLogger(object):
     """
