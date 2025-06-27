@@ -571,13 +571,34 @@ class SequenceDataset(torch.utils.data.Dataset):
             if len(ac.shape) == 1:
                 ac = ac.reshape(-1, 1)
             ac_dict[k] = ac
-       
+
         # normalize actions
         action_normalization_stats = self.get_action_normalization_stats()
         ac_dict = ObsUtils.normalize_dict(ac_dict, normalization_stats=action_normalization_stats)
 
         # concatenate all action components
         meta["actions"] = AcUtils.action_dict_to_vector(ac_dict)
+
+        # Normalize distribution keys if they exist (for KL divergence training)
+        for action_key in self.action_keys:
+            dist_mean_key = f"{action_key}_dist/mean"
+            dist_std_key = f"{action_key}_dist/std"
+
+            if dist_mean_key in meta and dist_std_key in meta:
+                action_stats = action_normalization_stats.get(action_key, None)
+                if action_stats is not None:
+                    # Normalize mean with full normalization (offset + scale)
+                    meta[dist_mean_key] = (
+                        meta[dist_mean_key] - action_stats["offset"]
+                    ) / action_stats["scale"]
+
+                    # Normalize std with only scaling (no offset)
+                    meta[dist_std_key] = meta[dist_std_key] / action_stats["scale"]
+
+        # keys to reshape
+        for k in meta["obs"]:
+            if len(meta["obs"][k].shape) == 1:
+                meta["obs"][k] = np.expand_dims(meta["obs"][k], axis=1)
 
         # also return the sampled index
         meta["index"] = index
@@ -1032,6 +1053,22 @@ class R2D2Dataset(SequenceDataset):
         # concatenate all action components
         meta["actions"] = AcUtils.action_dict_to_vector(ac_dict)
 
+        # Normalize distribution keys if they exist (for KL divergence training)
+        for action_key in self.action_keys:
+            dist_mean_key = f"{action_key}_dist/mean"
+            dist_std_key = f"{action_key}_dist/std"
+            
+            if dist_mean_key in meta and dist_std_key in meta:
+                action_stats = action_normalization_stats.get(action_key, None)
+                if action_stats is not None:
+                    # Normalize mean with full normalization (offset + scale)
+                    meta[dist_mean_key] = (
+                        meta[dist_mean_key] - action_stats["offset"]
+                    ) / action_stats["scale"]
+                    
+                    # Normalize std with only scaling (no offset)
+                    meta[dist_std_key] = meta[dist_std_key] / action_stats["scale"]
+
         # keys to reshape
         for k in meta["obs"]:
             if len(meta["obs"][k].shape) == 1:
@@ -1254,6 +1291,7 @@ def _compute_traj_stats(traj_obs_dict):
 
     return traj_stats
 
+
 def _aggregate_traj_stats(traj_stats_a, traj_stats_b):
     """
     Helper function to aggregate trajectory statistics.
@@ -1292,7 +1330,7 @@ def action_stats_to_normalization_stats(action_stats, action_config):
             # instead of -1 and 1 use numbers just below threshold to prevent numerical instability issues
             output_min = -0.999999
             output_max = 0.999999
-            
+
             # ignore input dimentions that is too small to prevent division by zero
             input_range = input_max - input_min
             ignore_dim = input_range < range_eps

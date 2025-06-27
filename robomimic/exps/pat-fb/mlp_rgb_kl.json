@@ -1,13 +1,13 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "mlp_rgb",
+        "name": "mlp_rgb_kl",
         "validate": true,
         "logging": {
             "terminal_output_to_txt": true,
             "log_tb": true,
             "log_wandb": true,
-            "wandb_proj_name": "pat-fb-mlp"
+            "wandb_proj_name": "pat-fb-mlp-kl"
         },
         "save": {
             "enabled": true,
@@ -36,6 +36,11 @@
         "frame_stack": 1,
         "pad_frame_stack": true,
         "dataset_keys": [
+            "actions",
+            "actions_dist/mean",
+            "actions_dist/std"
+        ],
+        "action_keys": [
             "actions"
         ],
         "goal_mode": null,
@@ -79,6 +84,10 @@
             "min_std": 0.01,
             "std_activation": "softplus",
             "low_noise_eval": false
+        },
+        "kl_divergence": {
+            "enabled": true,
+            "epsilon": 1e-6
         },
         "gmm": {
             "enabled": false,
@@ -212,4 +221,4 @@
             }
         }
     }
-}
+} 

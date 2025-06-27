@@ -47,6 +47,10 @@ class BCConfig(BaseConfig):
         self.algo.gaussian.std_activation = "softplus"  # activation to use for std output from policy net
         self.algo.gaussian.low_noise_eval = True        # low-std at test-time 
 
+        # KL divergence training settings
+        self.algo.kl_divergence.enabled = False         # whether to use KL divergence loss instead of log probability
+        self.algo.kl_divergence.epsilon = 1e-6          # small epsilon for numerical stability in KL computation
+
         # stochastic GMM policy settings
         self.algo.gmm.enabled = False                   # whether to train a GMM policy
         self.algo.gmm.num_modes = 5                     # number of GMM modes

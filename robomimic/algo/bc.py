@@ -40,6 +40,9 @@ def algo_config_to_class(algo_config):
     gmm_enabled = ("gmm" in algo_config and algo_config.gmm.enabled)
     vae_enabled = ("vae" in algo_config and algo_config.vae.enabled)
 
+    # Check if KL divergence training is enabled
+    kl_enabled = ("kl_divergence" in algo_config and algo_config.kl_divergence.enabled)
+
     rnn_enabled = algo_config.rnn.enabled
     transformer_enabled = algo_config.transformer.enabled
 
@@ -49,7 +52,10 @@ def algo_config_to_class(algo_config):
         elif transformer_enabled:
             raise NotImplementedError
         else:
-            algo_class, algo_kwargs = BC_Gaussian, {}
+            if kl_enabled:
+                algo_class, algo_kwargs = BC_Gaussian_KL, {}
+            else:
+                algo_class, algo_kwargs = BC_Gaussian, {}
     elif gmm_enabled:
         if rnn_enabled:
             algo_class, algo_kwargs = BC_RNN_GMM, {}
@@ -344,6 +350,160 @@ class BC_Gaussian(BC):
         log = PolicyAlgo.log_info(self, info)
         log["Loss"] = info["losses"]["action_loss"].item()
         log["Log_Likelihood"] = info["losses"]["log_probs"].item() 
+        if "policy_grad_norms" in info:
+            log["Policy_Grad_Norms"] = info["policy_grad_norms"]
+        return log
+
+
+class BC_Gaussian_KL(BC_Gaussian):
+    """
+    BC training with a Gaussian policy using KL divergence loss instead of log probability.
+    This class expects the dataset to contain 'actions_dist' with 'mean' and 'std' keys.
+    """
+
+    def process_batch_for_training(self, batch):
+        """
+        Processes input batch from a data loader to filter out
+        relevant information and prepare the batch for training.
+        Also loads the action distribution parameters from the dataset.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader
+
+        Returns:
+            input_batch (dict): processed and filtered batch that
+                will be used for training 
+        """
+        input_batch = dict()
+        input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
+        input_batch["goal_obs"] = batch.get("goal_obs", None)  # goals may not be present
+
+        # Load the action distribution parameters from the specific subkeys
+        input_batch["actions_dist"] = {
+            "mean": batch["actions_dist/mean"][:, 0, :],
+            "std": batch["actions_dist/std"][:, 0, :],
+        }
+
+        # we move to device first before float conversion because image observation modalities will be uint8 -
+        # this minimizes the amount of data transferred to GPU
+        return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
+
+    def _forward_training(self, batch):
+        """
+        Internal helper function for BC algo class. Compute forward pass
+        and return network outputs in @predictions dict.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            predictions (dict): dictionary containing network outputs
+        """
+        dists = self.nets["policy"].forward_train(
+            obs_dict=batch["obs"],
+            goal_dict=batch["goal_obs"],
+        )
+
+        # make sure that this is a batch of multivariate action distributions
+        assert len(dists.batch_shape) == 1
+
+        # Get the predicted distribution parameters
+        pred_mean = dists.mean
+        pred_std = dists.stddev
+
+        gt_mean = batch["actions_dist"]["mean"]
+        gt_std = batch["actions_dist"]["std"]
+
+        # Add small epsilon for numerical stability
+        eps = self.algo_config.kl_divergence.epsilon
+        gt_std = torch.clamp(gt_std, min=eps)
+        pred_std = torch.clamp(pred_std, min=eps)
+
+        # Compute KL divergence between predicted and ground truth Gaussians
+        # KL(pred || gt) = 0.5 * (log(gt_var/pred_var) + (pred_var + (pred_mean - gt_mean)^2)/gt_var - 1)
+        kl_div = self._compute_kl_divergence(pred_mean, pred_std, gt_mean, gt_std)
+
+        predictions = OrderedDict(
+            pred_mean=pred_mean,
+            pred_std=pred_std,
+            kl_div=kl_div,
+        )
+
+        return predictions
+
+    def _compute_kl_divergence(self, pred_mean, pred_std, gt_mean, gt_std):
+        """
+        Compute KL divergence between two multivariate Gaussian distributions.
+
+        Args:
+            pred_mean (torch.Tensor): predicted mean [B, D]
+            pred_std (torch.Tensor): predicted standard deviation [B, D]
+            gt_mean (torch.Tensor): ground truth mean [B, D]
+            gt_std (torch.Tensor): ground truth standard deviation [B, D]
+
+        Returns:
+            kl_div (torch.Tensor): KL divergence [B]
+        """
+        # Convert to variance
+        pred_var = pred_std ** 2
+        gt_var = gt_std ** 2
+
+        # Compute KL divergence: KL(pred || gt)
+        # For multivariate Gaussians with diagonal covariance:
+        # KL = 0.5 * sum(log(gt_var/pred_var) + (pred_var + (pred_mean - gt_mean)^2)/gt_var - 1)
+
+        log_var_ratio = torch.log(gt_var / pred_var)
+        mean_diff_sq = (pred_mean - gt_mean) ** 2
+        var_ratio = pred_var / gt_var
+
+        kl_div = 0.5 * (log_var_ratio + var_ratio + mean_diff_sq / gt_var - 1)
+
+        # Sum over action dimensions to get per-sample KL divergence
+        kl_div = kl_div.sum(dim=-1)
+
+        return kl_div
+
+    def _compute_losses(self, predictions, batch):
+        """
+        Internal helper function for BC algo class. Compute losses based on
+        network outputs in @predictions dict, using reference labels in @batch.
+
+        Args:
+            predictions (dict): dictionary containing network outputs, from @_forward_training
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+        Returns:
+            losses (dict): dictionary of losses computed over the batch
+        """
+        losses = OrderedDict()
+
+        # Use KL divergence loss (required for BCGaussianKL)
+        kl_loss = predictions["kl_div"].mean()
+        losses["kl_loss"] = kl_loss
+        losses["action_loss"] = kl_loss
+
+        return losses
+
+    def log_info(self, info):
+        """
+        Process info dictionary from @train_on_batch to summarize
+        information to pass to tensorboard for logging.
+
+        Args:
+            info (dict): dictionary of info
+
+        Returns:
+            loss_log (dict): name -> summary statistic
+        """
+        log = PolicyAlgo.log_info(self, info)
+        log["Loss"] = info["losses"]["action_loss"].item()
+
+        if "kl_loss" in info["losses"]:
+            log["KL_Loss"] = info["losses"]["kl_loss"].item()
+
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
