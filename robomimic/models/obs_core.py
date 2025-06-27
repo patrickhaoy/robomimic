@@ -860,31 +860,40 @@ class ColorRandomizer(Randomizer):
         return msg
 
 
-class GaussianNoiseRandomizer(Randomizer):
+class GaussianBlurAndNoiseRandomizer(Randomizer):
     """
-    Randomly sample gaussian noise at input, and then average across noises at output.
+    Randomly sample gaussian blur and gaussian noise at input, and then average across
+    blurred and noised samples at output.
     """
     def __init__(
         self,
         input_shape,
+        gaussian_blur_std_range=(0.0, 1.5),
+        gaussian_noise_std_range=(0.0, 0.05),
         noise_mean=0.0,
-        noise_std=0.3,
         limits=None,
         num_samples=1,
     ):
         """
         Args:
             input_shape (tuple, list): shape of input (not including batch dimension)
+            gaussian_blur_std_range (tuple): Range (min, max) for standard deviation of
+                Gaussian blur kernel to apply. During forward pass, std is uniformly
+                sampled from this range.
+            gaussian_noise_std_range (tuple): Range (min, max) for standard deviation
+                of noise to apply. During forward pass, std is uniformly sampled from
+                this range.
             noise_mean (float): Mean of noise to apply
-            noise_std (float): Standard deviation of noise to apply
-            limits (None or 2-tuple): If specified, should be the (min, max) values to clamp all noisied samples to
-            num_samples (int): number of random color jitters to take
+            limits (None or 2-tuple): If specified, should be the (min, max) values to
+                clamp all blurred and noised samples to
+            num_samples (int): number of random blur and noise samples to take
         """
-        super(GaussianNoiseRandomizer, self).__init__()
+        super(GaussianBlurAndNoiseRandomizer, self).__init__()
 
         self.input_shape = input_shape
+        self.gaussian_blur_std_range = gaussian_blur_std_range
+        self.gaussian_noise_std_range = gaussian_noise_std_range
         self.noise_mean = noise_mean
-        self.noise_std = noise_std
         self.limits = limits
         self.num_samples = num_samples
 
@@ -900,13 +909,55 @@ class GaussianNoiseRandomizer(Randomizer):
 
     def _forward_in(self, inputs):
         """
-        Samples N random gaussian noises for each input in the batch, and then reshapes
-        inputs to [B * N, ...].
+        Samples N random gaussian blur and noise combinations for each input in the
+        batch, and then reshapes inputs to [B * N, ...].
         """
         out = TensorUtils.repeat_by_expand_at(inputs, repeats=self.num_samples, dim=0)
 
-        # Sample noise across all samples
-        out = torch.rand(size=out.shape) * self.noise_std + self.noise_mean + out
+        # Uniformly sample blur std from the range for each sample in the batch
+        batch_size = out.shape[0]
+        blur_std = torch.rand(batch_size, device=out.device) * (
+            self.gaussian_blur_std_range[1] - self.gaussian_blur_std_range[0]
+        ) + self.gaussian_blur_std_range[0]
+
+        # Uniformly sample noise std from the range for each sample in the batch
+        noise_std = torch.rand(batch_size, device=out.device) * (
+            self.gaussian_noise_std_range[1] - self.gaussian_noise_std_range[0]
+        ) + self.gaussian_noise_std_range[0]
+
+        # Apply Gaussian blur to each sample with its specific std
+        blurred_outputs = []
+        for i in range(batch_size):
+            # Get the current sample
+            sample = out[i:i+1]
+            
+            # Apply Gaussian blur if std > 0
+            if blur_std[i] > 0:
+                # Convert std to kernel size (rule of thumb: kernel_size = 2*ceil(3*std) + 1)
+                kernel_size = int(2 * torch.ceil(3 * blur_std[i]).item()) + 1
+                # Ensure kernel size is odd and at least 3
+                kernel_size = max(3, kernel_size if kernel_size % 2 == 1 else kernel_size + 1)
+                
+                # Apply Gaussian blur using torchvision
+                blurred_sample = TVF.gaussian_blur(
+                    sample, 
+                    kernel_size=[kernel_size, kernel_size],
+                    sigma=[blur_std[i].item(), blur_std[i].item()]
+                )
+            else:
+                blurred_sample = sample
+            
+            blurred_outputs.append(blurred_sample)
+        
+        # Stack all blurred samples
+        out = torch.cat(blurred_outputs, dim=0)
+
+        # Reshape noise_std to broadcast with the input tensor
+        noise_std = noise_std.view(batch_size, *([1] * (out.dim() - 1)))
+
+        # Sample Gaussian noise across all samples with batch-specific std
+        noise = torch.randn(size=out.shape, device=out.device) * noise_std + self.noise_mean
+        out = out + noise
 
         # Possibly clamp
         if self.limits is not None:
@@ -916,9 +967,9 @@ class GaussianNoiseRandomizer(Randomizer):
 
     def _forward_out(self, inputs):
         """
-        Splits the outputs from shape [B * N, ...] -> [B, N, ...] and then average across N
-        to result in shape [B, ...] to make sure the network output is consistent with
-        what would have happened if there were no randomization.
+        Splits the outputs from shape [B * N, ...] -> [B, N, ...] and then average
+        across N to result in shape [B, ...] to make sure the network output is
+        consistent with what would have happened if there were no randomization.
         """
         batch_size = (inputs.shape[0] // self.num_samples)
         out = TensorUtils.reshape_dimensions(inputs, begin_axis=0, end_axis=0,
@@ -949,6 +1000,7 @@ class GaussianNoiseRandomizer(Randomizer):
     def __repr__(self):
         """Pretty print network."""
         header = '{}'.format(str(self.__class__.__name__))
-        msg = header + f"(input_shape={self.input_shape}, noise_mean={self.noise_mean}, noise_std={self.noise_std}, " \
+        msg = header + f"(input_shape={self.input_shape}, gaussian_blur_std_range={self.gaussian_blur_std_range}, " \
+                       f"gaussian_noise_std_range={self.gaussian_noise_std_range}, noise_mean={self.noise_mean}, " \
                        f"limits={self.limits}, num_samples={self.num_samples})"
         return msg

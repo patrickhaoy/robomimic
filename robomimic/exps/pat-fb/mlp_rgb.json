@@ -195,8 +195,11 @@
                         "noise_std": 0.0
                     }
                 },
-                "obs_randomizer_class": null,
-                "obs_randomizer_kwargs": {}
+                "obs_randomizer_class": "GaussianBlurAndNoiseRandomizer",
+                "obs_randomizer_kwargs": {
+                    "gaussian_blur_std_range": [0.0, 1.5],
+                    "gaussian_noise_std_range": [0.0, 0.03]
+                }
             },
             "depth": {
                 "core_class": "VisualCore",
